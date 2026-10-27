@@ -18,7 +18,10 @@ The `extension/` folder is a Chrome extension. On your auction group in Facebook
 
 Everything stays in your browser.
 
-### Updating
+### The tracker website
+The tracker page is hosted at https://crystack100.github.io/pokemon-auction-tracker/ (GitHub Pages, from `main`). Clicking the extension's icon opens it. The page reads your saved auctions from the extension through `extension/site-bridge.js`, and re-reads every post with the newest `parser.js`, so changes to the page or the reading rules go live as soon as they're pushed. Only changes inside `extension/` need the steps below.
+
+### Updating the extension
 Replace the folder's files with the new ones (or `git pull`), then press the ↻ reload arrow on the extension in `chrome://extensions` and refresh Facebook. The tracker shows its version at the top, so you can check the new one is running.
 
 ## Web page (paste-in)

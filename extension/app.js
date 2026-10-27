@@ -1,5 +1,7 @@
 /* Pokémon Auction Tracker: auction list, storage and the eBay comparison. Parsing lives in parser.js. */
 (function () {
+  // On the website, the extension is reached through bridge.js; inside the extension, directly.
+  const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
@@ -400,6 +402,32 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
     }).join('') : `<tr><td colspan="5" class="hint">No live tracked auctions yet.</td></tr>`;
   }
 
+  // Facebook auctions are re-read from the saved post text and comments every time the page loads,
+  // so improvements to the reader apply straight away, without updating the extension.
+  // Anything you corrected in "Fix details" is kept.
+  function derive(a) {
+    if (a.source !== 'facebook' || !a.raw) return a;
+    const out = { ...a };
+    const edited = a.edited || {};
+    const parsed = P.parse(a.raw, new Date(a.addedAt || a.lastSeenAt || Date.now()), { postOnly: true });
+    if (!parsed.cardName) {
+      const fromPhoto = (a.imageText || []).map(t => t.replace(/\s+/g, ' ').trim()).find(t => t.length >= 4 && t.length <= 80);
+      parsed.cardName = fromPhoto ? fromPhoto.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : (a.seller ? 'Auction by ' + a.seller : '');
+    }
+    for (const f of ['title', 'cardName', 'grade', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe']) {
+      if (edited[f] || edited[f === 'hasReserve' ? 'reserve' : f]) continue;
+      if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
+    }
+    if (parsed.endsAt && !edited.endsAt) { out.endsAt = parsed.endsAt; out.zone = parsed.zone; }
+    if (Array.isArray(a.allComments) && !a.manualBid) {
+      const bids = a.allComments.map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
+      const top = bids.reduce((m, x) => (!m || x.amount > m.amount ? x : m), null);
+      if (top) Object.assign(out, { currentBid: top.amount, topBidder: top.name });
+      out.bidCount = bids.length;
+    }
+    return out;
+  }
+
   function render() {
     renderFound();
     renderUnder();
@@ -619,7 +647,7 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
     $('storeStatus').textContent = store.kind === 'db' ? 'Saved to this page, on every device' : store.kind === 'chrome' ? $('storeStatus').textContent : 'Saved in this browser';
     let first = true;
     store.subscribe(list => {
-      auctions = list;
+      auctions = list.map(derive);
       if (first && !list.length && !$('raw').value && !inExtension) {
         $('raw').value = EXAMPLE; readBench();
         $('parseNote').textContent = 'Example post loaded. Press Add to tracker to try it, or Clear and paste your own.';

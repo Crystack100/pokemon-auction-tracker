@@ -1,3 +1,5 @@
+// The tracker page lives on the website, so it updates without reinstalling the extension.
+const TRACKER_URL = 'https://crystack100.github.io/pokemon-auction-tracker/';
 /* Background worker: saves the auctions you track, looks up eBay sold prices, and updates
    a tracked post when you ask it to. Nothing runs on a timer. */
 importScripts('parser.js', 'ebay.js', 'fbjson.js');
@@ -92,6 +94,11 @@ async function onAuctionSeen(p, fromTabId, track) {
   }
   a.bidCount = Math.max(a.bidCount || 0, parsed.bidCount);
   a.commentsRead = (p.comments || []).length;
+  // Every comment ever read, and the words Facebook read off the photos, so the tracker website can
+  // re-read the post with its newest rules.
+  const have = new Set((a.allComments || []).map(c => c.name + '|' + c.text));
+  a.allComments = [...(a.allComments || []), ...(p.comments || []).filter(c => !have.has(c.name + '|' + c.text))].slice(-500);
+  if (p.imageText && p.imageText.length) a.imageText = p.imageText;
 
   if (!a.photoSet && /^\d+$/.test(a.id)) a.photoSet = 'pcb.' + a.id;
   await putAuction(a);
@@ -232,8 +239,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'auction-seen') onAuctionSeen(msg.payload, sender.tab && sender.tab.id, msg.track);
   if (msg.type === 'debug-dump') {
     chrome.storage.local.set({ debugDump: msg.dump });
-    const url = chrome.runtime.getURL('dashboard.html');
-    chrome.tabs.query({ url }).then(([t]) => t ? chrome.tabs.update(t.id, { active: true }) : chrome.tabs.create({ url }));
+    const url = TRACKER_URL;
+    chrome.tabs.query({ url: TRACKER_URL + '*' }).then(([t]) => t ? chrome.tabs.update(t.id, { active: true }) : chrome.tabs.create({ url }));
   }
   if (msg.type === 'ebay-result') getAuction(msg.id).then(a => a && putAuction({ ...a, ebayAuto: msg.result }));
   if (msg.type === 'update-now') {
@@ -292,7 +299,7 @@ async function autoUpdate() {
 chrome.alarms.get('auto-update', al => { if (!al) chrome.alarms.create('auto-update', { periodInMinutes: 1 }); });
 chrome.alarms.onAlarm.addListener(al => { if (al.name === 'auto-update') autoUpdate(); });
 chrome.action.onClicked.addListener(async () => {
-  const url = chrome.runtime.getURL('dashboard.html');
-  const [tab] = await chrome.tabs.query({ url });
+  const url = TRACKER_URL;
+  const [tab] = await chrome.tabs.query({ url: TRACKER_URL + '*' });
   if (tab) chrome.tabs.update(tab.id, { active: true }); else chrome.tabs.create({ url });
 });
