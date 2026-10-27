@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.1';
+  const SITE_VERSION = '0.15.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -644,6 +644,7 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
     }
     const onSite = !(window.chrome && window.chrome.storage && window.chrome.runtime && window.chrome.runtime.id);
     $('verBadge').textContent = `${onSite ? 'Site v' + SITE_VERSION : 'Built-in page v' + SITE_VERSION} · Extension ${inExtension ? 'v' + chrome.runtime.getManifest().version : 'not connected'}`;
+    if (onSite && !inExtension) $('noExt').hidden = false;
     wire();
     render();
     store = await initStore();
