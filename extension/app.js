@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.6';
+  const SITE_VERSION = '0.15.7';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -166,7 +166,7 @@ function countdownText(iso) {
   const endOf = a => a.extendedTo || a.endsAt;
   function verdict(a) {
     const bid = a.currentBid ?? a.startBid;
-    if (bid == null) return { cls: 'none', text: 'No bids yet', ratio: null };
+    if (bid == null) { const m = marketPrice(a); return { cls: 'none', text: m ? `No bids yet · eBay AU ${money(m)}` : 'No bids yet', ratio: null }; }
     const market = marketPrice(a);
     const st = a.ebayAuto && a.ebayAuto.status;
     if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No eBay AU price yet' : 'Add eBay last sold to compare', ratio: null };
