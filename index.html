@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <!--PAGE-->
 <title>Pokémon Auction Tracker</title>
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,6 +53,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(-
 header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
 h1 { font: 700 2.2rem/1 var(--display); letter-spacing: .01em; margin: 0; text-transform: uppercase; }
 h1 span { color: var(--label); }
+h1 .logo { width: 40px; height: 40px; vertical-align: -6px; margin-right: 10px; border-radius: 9px; }
 .sub { color: var(--muted); margin: 4px 0 0; }
 h2 { font: 600 1.25rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .04em; margin: 0; }
 button, .btn { font: 600 .9rem var(--body); border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 12px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
@@ -179,7 +181,7 @@ details textarea { min-height: 120px; margin-top: 6px; }
 <div class="wrap">
   <header>
     <div>
-      <h1>Pokémon Auction <span>Tracker</span></h1>
+      <h1><img class="logo" src="assets/logo.svg" alt="" width="40" height="40">Pokémon Auction <span>Tracker</span></h1>
       <p class="sub" id="sub">Paste a Facebook auction post. See the live bid next to what the card last sold for on eBay.</p>
     </div>
     <div class="row">

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Pokémon Auction Tracker logo">
+  <rect width="128" height="128" rx="28" fill="#d42a38"/>
+  <!-- trading card -->
+  <g transform="rotate(-10 52 60)">
+    <rect x="24" y="20" width="56" height="78" rx="8" fill="#fff"/>
+    <rect x="31" y="27" width="42" height="34" rx="4" fill="#1b2233"/>
+    <path d="M37 54 l9 -10 l7 6 l8 -12 l6 16 z" fill="#f5c542"/>
+    <rect x="31" y="67" width="42" height="5" rx="2.5" fill="#1b2233" opacity=".85"/>
+    <rect x="31" y="76" width="28" height="5" rx="2.5" fill="#1b2233" opacity=".45"/>
+  </g>
+  <!-- gavel -->
+  <g transform="rotate(-40 94 88)">
+    <rect x="89" y="78" width="10" height="44" rx="5" fill="#1b2233" stroke="#fff" stroke-width="4"/>
+    <rect x="72" y="62" width="44" height="22" rx="6" fill="#1b2233" stroke="#fff" stroke-width="4"/>
+    <rect x="72" y="62" width="8" height="22" rx="3" fill="#f5c542"/>
+    <rect x="108" y="62" width="8" height="22" rx="3" fill="#f5c542"/>
+  </g>
+</svg>
