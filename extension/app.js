@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.7';
+  const SITE_VERSION = '0.15.8';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -165,9 +165,10 @@ function countdownText(iso) {
   const marketPrice = a => a.ebaySold ?? (a.ebayAuto && a.ebayAuto.currency !== 'USD' ? a.ebayAuto.price : null) ?? null;
   const endOf = a => a.extendedTo || a.endsAt;
   function verdict(a) {
-    const bid = a.currentBid ?? a.startBid;
-    if (bid == null) { const m = marketPrice(a); return { cls: 'none', text: m ? `No bids yet · eBay AU ${money(m)}` : 'No bids yet', ratio: null }; }
     const market = marketPrice(a);
+    // No bids yet counts as $0, so the card still compares against the eBay price.
+    const bid = a.currentBid ?? a.startBid ?? (market ? 0 : null);
+    if (bid == null) return { cls: 'none', text: 'No bids yet', ratio: null };
     const st = a.ebayAuto && a.ebayAuto.status;
     if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No eBay AU price yet' : 'Add eBay last sold to compare', ratio: null };
     const total = bid;
@@ -306,7 +307,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         <div class="price">
           ${a.example ? '<span class="example-tag">Example</span>' : ''}
           <span class="k">${a.currentBid == null && a.startBid != null ? 'Starting bid' : cd.ended ? 'Final bid' : 'Current bid'}</span>
-          <span class="v">${money(a.currentBid ?? a.startBid)}</span>
+          <span class="v">${money(a.currentBid ?? a.startBid ?? 0)}</span>
           <span class="who">${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
           <span class="pill ${v.cls}">${v.text}</span>
         </div>
