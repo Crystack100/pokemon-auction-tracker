@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.8';
+  const SITE_VERSION = '0.15.9';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -174,9 +174,10 @@ function countdownText(iso) {
     const total = bid;
     const ratio = total / market;
     const pct = Math.round(Math.abs(1 - ratio) * 100);
-    if (ratio < 0.85) return { cls: 'good', text: `Under market by ${pct}%`, ratio, total };
-    if (ratio <= 1.05) return { cls: 'warn', text: ratio < 1 ? `Near market (${pct}% under)` : `At market (${pct}% over)`, ratio, total };
-    return { cls: 'bad', text: `Over market by ${pct}%`, ratio, total };
+    const gap = money(Math.abs(market - total));
+    if (ratio < 0.85) return { cls: 'good', text: `Under market by ${gap} (${pct}%)`, ratio, total };
+    if (ratio <= 1.05) return { cls: 'warn', text: ratio < 1 ? `Near market: ${gap} under (${pct}%)` : `At market: ${gap} over (${pct}%)`, ratio, total };
+    return { cls: 'bad', text: `Over market by ${gap} (${pct}%)`, ratio, total };
   }
 
   function ebayQuery(a) { return (a.ebayQuery || `${a.cardName || ''} ${a.grade || ''}`).trim(); }
