@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.4';
+  const SITE_VERSION = '0.15.5';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -183,6 +183,7 @@ function countdownText(iso) {
     const q = encodeURIComponent(ebayQuery(a));
     return [
       [inExtension ? 'Get eBay average' : 'eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${inExtension ? '#pat=' + a.id : ''}`],
+      ...(inExtension ? [['eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60`]] : []),
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       ['PriceCharting', `https://www.pricecharting.com/search-products?type=prices&q=${q}`],
     ];
@@ -325,8 +326,9 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
           ${v.ratio != null ? `<div class="bar" title="Line marks the eBay price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
           <span class="hint">eBay average ${money(market)}. Bid up to ${money(maxBid)} to stay at or under market.</span>` : ''}
           ${autoText ? `<span class="hint">${autoText}${auto.checkedAt ? ' · checked ' + esc(ago(auto.checkedAt)) : ''}</span>` : ''}
-          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" data-act="update-now">↻ Update bids</button>' : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
+          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
+        ${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" class="update-row" data-act="update-now">↻ Update bids</button>' : ''}
         <details>
           <summary>Fix details</summary>
           ${inExtension ? '' : `<p class="hint">Copy the post again from Facebook with the newest comments and paste it here.</p>
