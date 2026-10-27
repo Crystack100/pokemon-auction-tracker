@@ -180,6 +180,9 @@
     const lines = postLines.map(l => ({ raw: l, text: clean(l) }));
     const picked = [];
     for (const l of lines) {
+      // "Wednesday Auction Lot 5 - Prismatic ETB": drop the auction label and keep the item after it.
+      const named = l.text.match(/^(?:.{0,30}?\b)?auction\b(?:\s*(?:lot|#|no\.?)\s*\d+)?\s*[-–:|]\s*(.{3,})$/i);
+      if (!picked.length && named && !BOILER.test(named[1])) { picked.push(named[1]); continue; }
       if (SEPARATOR.test(l.text) || BOILER.test(l.text)) { if (picked.length) break; continue; }
       if (PUBLISHER.test(l.text)) continue;
       if (picked.length && /^\d+\s*x\b/i.test(l.text)) break;
@@ -198,11 +201,12 @@
       // Use just the stretch of the line around the grade, in case the post came through as one long line.
       const line = postLines.find(l => l.includes(g[0])) || '';
       const parts = line.split(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]|!{2,}|\s[-–|]\s/u);
-      source = clean(parts.find(p => p.includes(g[0])) || line);
+      source = clean(parts.find(p => p.includes(g[0])) || line).replace(/^(?:.{0,30}?\b)?auction\b(?:\s*(?:lot|#|no\.?)\s*\d+)?\s*[-–:|]\s*/i, '');
     }
     else source = titleFromBlocks(postLines);
     let name = source.replace(g ? g[0] : '', ' ').replace(/[:–\-|]+/g, ' ').replace(NOISE, ' ').replace(/[^\w\s'.#/&é-]/g, ' ').replace(/\s+/g, ' ').trim();
-    name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+      .replace(/\b(etb|sar|sir|ir|ar|ex|gx|vmax|vstar|upc|tcg|psa|bgs|cgc|chr|tg|hr|ur|ssp|1st)\b/gi, w => w.toUpperCase());
     return { grade, cardName: name };
   }
 
@@ -213,7 +217,7 @@
     const prices = [];
     for (const l of postLines.slice(start, start + 8)) {
       if (prices.length && /payment|paypal|pay\s*id|bidding|increment/i.test(l)) break;
-      if (/insur|STC|combined/i.test(l)) continue;
+      if (/insur|STC|combined|optional|signature|\+\s*\$/i.test(l)) continue;
       for (const m of l.matchAll(/\$\s*(\d[\d,]*(?:\.\d{2})?)/g)) prices.push(num(m[1]));
     }
     if (/free\s*(post|shipping)/i.test(postLines.slice(start, start + 3).join(' ')) && !prices.length) return 0;
