@@ -88,6 +88,7 @@ label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transfo
 .photo { width: 110px; aspect-ratio: 5 / 7; max-width: 100%; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: .7rem; text-align: center; cursor: pointer; }
 .photo img { width: 100%; height: 100%; object-fit: cover; }
 .photo { position: relative; }
+.ver { position: fixed; top: 8px; right: 12px; z-index: 20; font-size: .75rem; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
 .photo .count { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,.65); color: #fff; font-size: .65rem; padding: 1px 5px; border-radius: 4px; }
 .gallery { display: flex; flex-direction: column; gap: 4px; width: 110px; max-width: 100%; }
 .strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
@@ -170,6 +171,7 @@ details textarea { min-height: 120px; margin-top: 6px; }
 <!--/HEAD-->
 </head>
 <body>
+<div class="ver" id="verBadge">Site v—</div>
 <div class="wrap">
   <header>
     <div>
@@ -306,7 +308,6 @@ details textarea { min-height: 120px; margin-top: 6px; }
   <button type="button" class="lb-nav" id="lbNext" aria-label="Next photo">›</button>
   <span class="lb-count"><span id="lbCount"></span><br><small id="lbNote"></small></span>
 </div>
-<script src="parser.js"></script>
 <script src="bridge.js"></script>
 </body>
 </html>
