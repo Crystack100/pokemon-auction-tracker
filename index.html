@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!--PAGE-->
+<title>Pokémon Auction Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a paste bench up top, then a grid of graded-slab cards sorted by ending soonest. */
+:root {
+  --bg: #eef1f6;
+  --surface: #ffffff;
+  --ink: #141a2b;
+  --muted: #5b647a;
+  --line: #d6dbe6;
+  --slab: #e4e9f2;
+  --label: #c8202f;
+  --label-ink: #ffffff;
+  --accent: #2446c7;
+  --good: #11804a;
+  --good-bg: #dcf3e6;
+  --warn: #9a6200;
+  --warn-bg: #fbefd6;
+  --bad: #b3261e;
+  --bad-bg: #fbe1df;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1220; --surface: #171c2e; --ink: #e8ecf6; --muted: #98a1b8; --line: #2a314a; --slab: #1f2640;
+    --label: #e0414e; --label-ink: #ffffff; --accent: #8aa4ff;
+    --good: #5fd59a; --good-bg: #123526; --warn: #f0b850; --warn-bg: #3a2c10; --bad: #ff8a80; --bad-bg: #3d1a19;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1220; --surface: #171c2e; --ink: #e8ecf6; --muted: #98a1b8; --line: #2a314a; --slab: #1f2640;
+  --label: #e0414e; --label-ink: #ffffff; --accent: #8aa4ff;
+  --good: #5fd59a; --good-bg: #123526; --warn: #f0b850; --warn-bg: #3a2c10; --bad: #ff8a80; --bad-bg: #3d1a19;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; display: grid; gap: 22px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+h1 { font: 700 2.2rem/1 var(--display); letter-spacing: .01em; margin: 0; text-transform: uppercase; }
+h1 span { color: var(--label); }
+.sub { color: var(--muted); margin: 4px 0 0; }
+h2 { font: 600 1.25rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .04em; margin: 0; }
+button, .btn { font: 600 .9rem var(--body); border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 12px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+button.primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .5; cursor: default; }
+input, textarea, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+textarea { min-height: 220px; resize: vertical; font-size: .85rem; line-height: 1.4; }
+label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: grid; gap: 4px; }
+
+.bench { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 14px; }
+.bench-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 760px) { .bench-grid { grid-template-columns: minmax(0, 1fr); } }
+.preview { display: grid; gap: 10px; align-content: start; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 12px; text-align: center; color: var(--muted); font-size: .85rem; cursor: pointer; display: grid; place-items: center; gap: 6px; min-height: 90px; }
+.drop.over { border-color: var(--accent); color: var(--accent); }
+.drop img { max-height: 140px; border-radius: 6px; }
+.hint { font-size: .8rem; color: var(--muted); margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.toolbar select { width: auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.empty { color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 14px; padding: 28px; text-align: center; }
+
+/* The card is drawn like a graded slab: red label strip on top, card window below. */
+.slab { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: grid; grid-template-rows: auto auto 1fr; }
+.slab.ended { opacity: .72; }
+.label { background: var(--label); color: var(--label-ink); padding: 8px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.label .name { font: 700 1.25rem/1.1 var(--display); text-transform: uppercase; letter-spacing: .03em; min-width: 0; overflow-wrap: anywhere; }
+.label .grade { font: 700 1.5rem/1 var(--display); white-space: nowrap; }
+.window { background: var(--slab); display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 12px; align-items: start; }
+.photo { width: 110px; aspect-ratio: 5 / 7; max-width: 100%; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: .7rem; text-align: center; cursor: pointer; }
+.photo img { width: 100%; height: 100%; object-fit: cover; }
+.photo { position: relative; }
+.photo .count { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,.65); color: #fff; font-size: .65rem; padding: 1px 5px; border-radius: 4px; }
+.gallery { display: flex; flex-direction: column; gap: 4px; width: 110px; max-width: 100%; }
+.strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.strip img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 3px; cursor: pointer; border: 1px solid var(--line); }
+.lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; }
+.lightbox[hidden] { display: none; }
+.lightbox img { max-width: calc(100% - 100px); max-height: 90vh; object-fit: contain; border-radius: 6px; }
+.lb-nav { background: rgba(255,255,255,.15); color: #fff; border: 0; font-size: 2rem; width: 40px; height: 56px; border-radius: 8px; cursor: pointer; }
+.lb-count { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #fff; font-size: .85rem; }
+.price { display: grid; gap: 2px; }
+.price .k { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.price .v { font: 700 2.2rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.price .who { font-size: .82rem; color: var(--muted); overflow-wrap: anywhere; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; width: fit-content; }
+.pill.good { background: var(--good-bg); color: var(--good); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+.pill.none { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+.body { padding: 12px; display: grid; gap: 12px; align-content: start; }
+dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: .88rem; }
+dt { color: var(--muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.ends { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; }
+.countdown { font: 700 1.3rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.countdown.soon { color: var(--bad); }
+.when { font-size: .8rem; color: var(--muted); text-align: right; }
+.market { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
+.market .inputs { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 8px; align-items: end; }
+.bar { position: relative; height: 8px; border-radius: 4px; background: var(--slab); overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.bar b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); left: 66.6%; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links a { font-size: .8rem; color: var(--accent); }
+.foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+details { font-size: .85rem; }
+details textarea { min-height: 120px; margin-top: 6px; }
+.watch { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.watch-text { display: grid; gap: 2px; min-width: 0; }
+.found { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; display: grid; gap: 10px; }
+.found-list { display: grid; }
+#groupForm select { width: auto; }
+.found-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding-block: 10px; border-top: 1px solid var(--line); }
+.found-row:first-child { border-top: 0; }
+.found-row .thumb { width: 48px; aspect-ratio: 5 / 7; border-radius: 4px; background: var(--slab); overflow: hidden; }
+.found-row .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.found-main { display: grid; gap: 2px; min-width: 0; }
+.found-main strong { overflow-wrap: anywhere; }
+.found-main .countdown { font: inherit; }
+@media (max-width: 520px) { .found-row { grid-template-columns: 48px minmax(0, 1fr); } .found-row > .row { grid-column: 2; } }
+.label-end { display: flex; align-items: center; gap: 10px; }
+.label .x { background: transparent; border: 1px solid currentColor; color: var(--label-ink); padding: 2px 8px; font-size: .85rem; line-height: 1.2; opacity: .85; }
+.label .x:hover { opacity: 1; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 10px; display: flex; gap: 12px; align-items: center; font-size: .9rem; z-index: 20; max-width: calc(100% - 32px); }
+.toast button { background: transparent; color: var(--bg); border-color: var(--bg); padding: 4px 10px; }
+.debug { background: var(--surface); border: 2px solid var(--accent); border-radius: 14px; padding: 14px 18px; display: grid; gap: 10px; }
+.debug textarea { min-height: 160px; font: .75rem/1.4 ui-monospace, Menlo, monospace; }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+.tab { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; padding: 8px 4px; margin-right: 14px; font: 600 1.1rem var(--display); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.tab[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--label); }
+.under { display: grid; gap: 12px; }
+.under-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.under-table { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 560px; }
+.under-table th { text-align: left; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.under-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.under-table tr:last-child td { border-bottom: 0; }
+.under-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.under-item { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.under-item .thumb { width: 36px; flex: none; aspect-ratio: 5 / 7; border-radius: 4px; background: var(--slab); overflow: hidden; }
+.under-item .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.under-table .countdown { font-size: 1rem; }
+.diff-good { color: var(--good); font-weight: 700; }
+.diff-bad { color: var(--bad); font-weight: 700; }
+.toggle { flex-direction: row; display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: .85rem; color: var(--ink); }
+.toggle input { width: auto; }
+.links button { padding: 2px 8px; font-size: .78rem; }
+.status { font-size: .8rem; color: var(--muted); }
+.example-tag { font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--warn); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+<!--/HEAD-->
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Pokémon Auction <span>Tracker</span></h1>
+      <p class="sub" id="sub">Paste a Facebook auction post. See the live bid next to what the card last sold for on eBay.</p>
+    </div>
+    <div class="row">
+      <label class="toggle" id="autoRow" hidden title="Reads your tracked posts quietly in the background. Never clicks or opens tabs."><input type="checkbox" id="autoRefresh" checked> Auto-update bids</label>
+      <button type="button" class="primary" id="updateAll" hidden>↻ Update all</button>
+      <button type="button" id="benchToggle" hidden>Add one by hand</button>
+      <span class="status" id="storeStatus">Saved on this device</span>
+    </div>
+  </header>
+
+  <section class="watch" id="watch" hidden aria-label="Groups being watched">
+    <div class="watch-text">
+      <strong id="watchTitle">Not watching any group yet</strong>
+      <span class="hint" id="watchNote">Open your auction group once in Chrome, or paste its link here. After that it's checked by itself while Chrome is open.</span>
+    </div>
+    <form class="row" id="groupForm">
+      <input id="groupUrl" placeholder="facebook.com/groups/…" aria-label="Facebook group link" style="width:min(260px,100%)">
+      <button type="submit">Watch group</button>
+      <select id="sweepMinutes" aria-label="How often to look for new auctions">
+        <option value="5">New posts every 5 min</option>
+        <option value="15">New posts every 15 min</option>
+        <option value="30">New posts every 30 min</option>
+        <option value="0">Don't look for new posts</option>
+      </select>
+      <button type="button" class="primary" id="checkNow">Check now</button>
+    </form>
+  </section>
+
+  <section class="bench" id="bench" aria-labelledby="addTitle">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="addTitle">Add an auction</h2>
+      <span class="hint">Copy the whole post and its comments from Facebook, then paste below.</span>
+    </div>
+    <div class="bench-grid">
+      <div style="display:grid;gap:8px">
+        <textarea id="raw" aria-label="Facebook post and comments" placeholder="Paste the auction post and its comments here"></textarea>
+        <div class="row">
+          <button class="primary" id="saveBtn" type="button">Add to tracker</button>
+          <button id="clearBtn" type="button">Clear</button>
+          <span class="hint" id="parseNote"></span>
+        </div>
+      </div>
+      <div class="preview">
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add card photo">
+          <span id="dropText">Card photo: paste a screenshot (Ctrl/Cmd+V), drop an image, or tap to choose</span>
+        </div>
+        <input type="file" id="file" accept="image/*" hidden>
+        <div class="fields">
+          <label>Card<input id="fCard"></label>
+          <label>Grade<input id="fGrade" placeholder="PSA 10"></label>
+          <label>Current bid ($)<input id="fBid" inputmode="decimal"></label>
+          <label>Top bidder<input id="fBidder"></label>
+          <label>Reserve<input id="fReserve" placeholder="None"></label>
+          <label>Postage ($)<input id="fPost" inputmode="decimal"></label>
+          <label>Ends<input id="fEnds" type="datetime-local"></label>
+          <label>Time zone in post<select id="fZone"></select></label>
+          <label>Seller<input id="fSeller" placeholder="Name on the post"></label>
+          <label>eBay last sold ($)<input id="fSold" inputmode="decimal" placeholder="Optional"></label>
+        </div>
+        <p class="hint">Check anything the reader got wrong before adding.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="found" id="foundSection" hidden aria-labelledby="foundTitle">
+    <div class="toolbar">
+      <div>
+        <h2 id="foundTitle">Found in your group <span id="foundCount"></span></h2>
+        <p class="hint">New auctions land here. Track the ones you want to follow.</p>
+      </div>
+      <button type="button" id="hideAll">Hide all</button>
+    </div>
+    <div id="foundList" class="found-list"></div>
+  </section>
+
+  <section class="debug" id="debugBox" hidden aria-labelledby="debugTitle">
+    <div class="toolbar">
+      <div>
+        <h2 id="debugTitle">Post details for fixing</h2>
+        <p class="hint">Copy this and paste it into your chat with Claude. It includes the post's text and commenters' names, so only share it there.</p>
+      </div>
+      <div class="row"><button type="button" class="primary" id="debugCopy">Copy</button><button type="button" id="debugClear">Clear</button></div>
+    </div>
+    <textarea id="debugText" readonly aria-label="Post details"></textarea>
+  </section>
+
+  <nav class="tabs" aria-label="Views">
+    <button type="button" class="tab" data-view="tracking" aria-pressed="true">Tracking</button>
+    <button type="button" class="tab" data-view="under" aria-pressed="false">Undervalued</button>
+  </nav>
+
+  <section id="underSection" class="under" hidden aria-labelledby="underTitle">
+    <div>
+      <h2 id="underTitle">Undervalued</h2>
+      <p class="hint">Current bid against the eBay average of recent sales. Biggest bargains first.</p>
+    </div>
+    <div class="under-wrap"><table class="under-table">
+      <thead><tr><th scope="col">Auction</th><th scope="col" class="num">Current bid</th><th scope="col" class="num">eBay average</th><th scope="col" class="num">Difference</th><th scope="col" class="num">Ends in</th></tr></thead>
+      <tbody id="underList"></tbody>
+    </table></div>
+  </section>
+
+  <section id="trackingSection" style="display:grid;gap:12px" aria-labelledby="listTitle">
+    <div class="toolbar">
+      <h2 id="listTitle">Tracking <span id="count"></span></h2>
+      <div class="row">
+        <label>Show
+          <select id="filter">
+            <option value="live">Live auctions</option>
+            <option value="under">Under market</option>
+            <option value="all">All, including ended</option>
+          </select>
+        </label>
+        <label>Sort
+          <select id="sort">
+            <option value="ends">Ending soonest</option>
+            <option value="deal">Best deal first</option>
+            <option value="added">Recently added</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-label="Photos">
+  <button type="button" class="lb-nav" id="lbPrev" aria-label="Previous photo">‹</button>
+  <img id="lbImg" alt="">
+  <button type="button" class="lb-nav" id="lbNext" aria-label="Next photo">›</button>
+  <span class="lb-count"><span id="lbCount"></span><br><small id="lbNote"></small></span>
+</div>
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
