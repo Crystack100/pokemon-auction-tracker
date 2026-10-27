@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.2';
+  const SITE_VERSION = '0.15.3';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -281,7 +281,9 @@ function countdownText(iso) {
   function renderCard(a) {
     const cd = countdownText(endOf(a));
     const v = verdict(a);
-    const reserve = a.reserve != null ? money(a.reserve) + (a.currentBid >= a.reserve ? ' (met)' : ' (not met)') : a.hasReserve ? 'Yes, amount unknown' : '$0 (no reserve)';
+    // Reserve: just the amount, green once the bid reaches it and red until then.
+    const reserveMet = a.reserve != null && a.reserve > 0 ? (a.currentBid ?? 0) >= a.reserve : null;
+    const reserve = a.reserve != null && a.reserve > 0 ? money(a.reserve) : a.hasReserve ? 'Amount unknown' : '$0';
     const fill = v.ratio == null ? 0 : Math.min(v.ratio / 1.5, 1) * 100;
     const fillColor = v.cls === 'good' ? 'var(--good)' : v.cls === 'bad' ? 'var(--bad)' : 'var(--warn)';
     const market = marketPrice(a);
@@ -305,13 +307,13 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
           ${a.example ? '<span class="example-tag">Example</span>' : ''}
           <span class="k">${a.currentBid == null && a.startBid != null ? 'Starting bid' : cd.ended ? 'Final bid' : 'Current bid'}</span>
           <span class="v">${money(a.currentBid ?? a.startBid)}</span>
-          <span class="who">${a.topBidder ? esc(a.topBidder) + ' · ' : ''}${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
+          <span class="who">${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
           <span class="pill ${v.cls}">${v.text}</span>
         </div>
       </div>
       <div class="body">
         <dl>
-          <dt>Reserve</dt><dd>${reserve}</dd>
+          <dt>Reserve</dt><dd${reserveMet == null ? '' : ` class="${reserveMet ? 'met' : 'unmet'}" title="${reserveMet ? 'Reserve met' : 'Reserve not met yet'}"`}>${reserve}</dd>
           ${a.antiSnipe ? '<dt>Anti-snipe</dt><dd>Extends in last 5 min</dd>' : ''}
         </dl>
         <div class="ends">
