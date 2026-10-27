@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.15.5';
+  const SITE_VERSION = '0.15.6';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -169,7 +169,7 @@ function countdownText(iso) {
     if (bid == null) return { cls: 'none', text: 'No bids yet', ratio: null };
     const market = marketPrice(a);
     const st = a.ebayAuto && a.ebayAuto.status;
-    if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No eBay average yet' : 'Add eBay last sold to compare', ratio: null };
+    if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No eBay AU price yet' : 'Add eBay last sold to compare', ratio: null };
     const total = bid;
     const ratio = total / market;
     const pct = Math.round(Math.abs(1 - ratio) * 100);
@@ -182,8 +182,8 @@ function countdownText(iso) {
   function marketLinks(a) {
     const q = encodeURIComponent(ebayQuery(a));
     return [
-      [inExtension ? 'Get eBay average' : 'eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${inExtension ? '#pat=' + a.id : ''}`],
-      ...(inExtension ? [['eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60`]] : []),
+      // Opening eBay AU sold listings also saves their average to the card (read by the extension on that page).
+      ['eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       ['PriceCharting', `https://www.pricecharting.com/search-products?type=prices&q=${q}`],
     ];
@@ -288,10 +288,9 @@ function countdownText(iso) {
     const fill = v.ratio == null ? 0 : Math.min(v.ratio / 1.5, 1) * 100;
     const fillColor = v.cls === 'good' ? 'var(--good)' : v.cls === 'bad' ? 'var(--bad)' : 'var(--warn)';
     const market = marketPrice(a);
-    const maxBid = market;
     const auto = a.ebayAuto || {};
-    const autoText = auto.average ? `eBay average ${money(auto.average)} from the last ${auto.count} sold` : auto.price ? `${auto.currency === 'USD' ? 'No Australian sales. eBay US: US' : 'eBay'} ${money(auto.price)}${auto.soldDate ? ', sold ' + esc(auto.soldDate) : ''}${auto.count > 1 ? ` · median of last ${auto.count}: ${money(auto.median)}` : ''}${auto.title ? `<br>Latest match: ${auto.itemUrl ? `<a href="${esc(auto.itemUrl)}" target="_blank" rel="noopener">${esc(auto.title)}</a>` : esc(auto.title)}` : ''}` :
-auto.status === 'none' ? 'No matching eBay sales found. Try other search words, then Get eBay average again.' : inExtension ? 'Tap "Get eBay average" to open eBay sold listings. The average is saved here once the page loads.' : '';
+    const autoText = auto.average ? `eBay AU average ${money(auto.average)} from the last ${auto.count} sold` : auto.price ? `${auto.currency === 'USD' ? 'No Australian sales. eBay US: US' : 'eBay'} ${money(auto.price)}${auto.soldDate ? ', sold ' + esc(auto.soldDate) : ''}${auto.count > 1 ? ` · median of last ${auto.count}: ${money(auto.median)}` : ''}${auto.title ? `<br>Latest match: ${auto.itemUrl ? `<a href="${esc(auto.itemUrl)}" target="_blank" rel="noopener">${esc(auto.title)}</a>` : esc(auto.title)}` : ''}` :
+auto.status === 'none' ? 'No matching eBay AU sales found. Try other search words, then open eBay AU sold again.' : inExtension ? 'Open "eBay AU sold" below. The Australian sold average is saved here once that page loads.' : '';
     const pics = photos(a);
     return `
     <article class="slab${cd.ended ? ' ended' : ''}" data-id="${a.id}">
@@ -323,8 +322,8 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
         </div>
         <div class="market">
           <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
-          ${v.ratio != null ? `<div class="bar" title="Line marks the eBay price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
-          <span class="hint">eBay average ${money(market)}. Bid up to ${money(maxBid)} to stay at or under market.</span>` : ''}
+          ${v.ratio != null ? `<div class="bar" title="Line marks the eBay AU price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
+` : ''}
           ${autoText ? `<span class="hint">${autoText}${auto.checkedAt ? ' · checked ' + esc(ago(auto.checkedAt)) : ''}</span>` : ''}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
@@ -395,7 +394,7 @@ auto.status === 'none' ? 'No matching eBay sales found. Try other search words, 
     }).sort((x, y) => (y.pct ?? -9) - (x.pct ?? -9));
     $('underList').innerHTML = rows.length ? rows.map(({ a, bid, avg, diff, pct }) => {
       const cd = countdownText(endOf(a));
-      const diffCell = diff == null ? (avg ? 'No bids yet' : `<a href="${esc(marketLinks(a)[0][1])}" target="_blank" rel="noopener">Get eBay average ↗</a>`)
+      const diffCell = diff == null ? (avg ? 'No bids yet' : `<a href="${esc(marketLinks(a)[0][1])}" target="_blank" rel="noopener">eBay AU sold ↗</a>`)
         : `<span class="${diff >= 0 ? 'diff-good' : 'diff-bad'}">${diff >= 0 ? money(diff) + ' under' : money(-diff) + ' over'} (${Math.round(Math.abs(pct) * 100)}%)</span>`;
       return `<tr>
         <td><div class="under-item"><div class="thumb">${a.image ? `<img src="${esc(a.image)}" alt="">` : ''}</div>
