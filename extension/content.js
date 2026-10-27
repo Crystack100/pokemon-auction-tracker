@@ -217,8 +217,8 @@
   function paintBar(bar) {
     const on = tracked.has(bar.dataset.key);
     bar.innerHTML = on
-      ? `<button type="button" data-act="update" style="${BTN}background:#11804a">✓ Tracking · ↻ Update bids</button><button type="button" data-act="stop" style="${BTN}background:#5b647a">Stop</button><button type="button" data-act="debug" style="${BTN}background:#2446c7">Send for fixing</button>`
-      : `<button type="button" data-act="track" style="${BTN}background:#c8202f">+ Track this auction</button><button type="button" data-act="debug" style="${BTN}background:#2446c7">Send for fixing</button>`;
+      ? `<button type="button" data-act="update" style="${BTN}background:#11804a">✓ Tracking · ↻ Update bids</button><button type="button" data-act="stop" style="${BTN}background:#5b647a">Stop</button>`
+      : `<button type="button" data-act="track" style="${BTN}background:#c8202f">+ Track this auction</button>`;
   }
 
   // A small bar of buttons above the post's text. Facebook can redraw posts, so it's re-added when missing.

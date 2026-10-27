@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pokémon Auction Tracker",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "Tracks Pokémon auctions in Facebook groups and compares live bids with eBay sold prices.",
   "permissions": [
     "storage",
