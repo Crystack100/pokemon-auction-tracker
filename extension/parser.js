@@ -204,7 +204,7 @@
       source = clean(parts.find(p => p.includes(g[0])) || line).replace(/^(?:.{0,30}?\b)?auction\b(?:\s*(?:lot|#|no\.?)\s*\d+)?\s*[-–:|]\s*/i, '');
     }
     else source = titleFromBlocks(postLines);
-    let name = source.replace(g ? g[0] : '', ' ').replace(/[:–\-|]+/g, ' ').replace(NOISE, ' ').replace(/[^\w\s'.#/&é-]/g, ' ').replace(/\s+/g, ' ').trim();
+    let name = source.replace(g ? g[0] : '', ' ').replace(/(?:^|\s)#?(?:[A-Z]{1,4})?\d{1,3}\s*\/\s*(?:[A-Z]{1,4})?\d{1,3}(?=\s|$)/gi, ' ').replace(/[:–\-|]+/g, ' ').replace(NOISE, ' ').replace(/[^\w\s'.#/&é-]/g, ' ').replace(/\s+/g, ' ').trim();
     name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
       .replace(/\b(etb|sar|sir|ir|ar|ex|gx|vmax|vstar|upc|tcg|psa|bgs|cgc|chr|tg|hr|ur|ssp|1st)\b/gi, w => w.toUpperCase());
     return { grade, cardName: name };
@@ -255,6 +255,7 @@
     return {
       title: clean(postLines[0] || ''),
       ...parseCard(postLines),
+      cardNumber: cardNumber(postText),
       postage: parsePostage(postLines),
       startBid: parseMoney(postText, /(?:start(?:ing)?(?:\s*bid)?|\bsb)\s*[:\-@]?\s*\$\s*(\d[\d,]*)/i),
       buyNow: parseMoney(postText, /(?:buy\s*now|\bbin)\s*[:\-@]?\s*\$\s*(\d[\d,]*)/i),
@@ -269,7 +270,24 @@
     };
   }
 
-  const api = { parse, bidAmount, zoneOffset, ZONES };
+  // The number printed bottom right of a card: "RC22/RC25", "113/114", "TG05/TG30", "SV107", "#113".
+  // A plain "28/10" is a date, so a number without letters needs a set size of 13 or more.
+  const CARD_NO = /(?:^|[^\w$\/])((?:[A-Z]{1,4})?\d{1,3})\s*\/\s*((?:[A-Z]{1,4})?\d{1,3})(?![\w\/])/i;
+  function cardNumber(text) {
+    for (const line of String(text || '').split('\n')) {
+      if (/\b(ends?|ending|closing|finish|am|pm)\b|\$/i.test(line)) continue;
+      const m = line.match(CARD_NO);
+      if (m) {
+        const lettered = /[a-z]/i.test(m[1] + m[2]);
+        if (lettered || (+m[2] >= 13 && +m[1] <= 999)) return (m[1] + '/' + m[2]).toUpperCase();
+      }
+      const h = line.match(/#\s*((?:[A-Z]{1,4})?\d{1,3})\b/i) || line.match(/\b((?:SV|SWSH|SM|XY|BW|TG|GG|RC|SVP)\d{2,3})\b/i);
+      if (h) return h[1].toUpperCase();
+    }
+    return '';
+  }
+
+  const api = { parse, bidAmount, zoneOffset, ZONES, cardNumber };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AuctionParser = api;
 })(typeof window !== 'undefined' ? window : globalThis);
