@@ -120,7 +120,8 @@
   function parseEnd(postLines, now) {
     const text = postLines.join('\n');
     let block = '';
-    const idx = postLines.findIndex(l => /auction\s*end|ends?\b|closing|finish/i.test(l));
+    let idx = postLines.findIndex(l => /auction\s*(ends?|ending|closes|closing|finish)/i.test(l));
+    if (idx < 0) idx = postLines.findIndex(l => /\b(ends?|ending|closes|closing)\b/i.test(l));
     if (idx >= 0) block = postLines.slice(idx, idx + 4).join(' ');
     const zone = findZone(block) || findZone(text) || ZONES.QLD;
     const time = findTime(block) || findTime(text);
@@ -170,7 +171,7 @@
   const clean = s => s.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}️‍]/gu, ' ').replace(/\s+/g, ' ').trim();
 
   // Lines that are auction housekeeping rather than what's being sold.
-  const BOILER = /auction|\bends?\b|\bhours?\b|tonight|finish|anti\s*-?\s*snipe|beware|scam|enjoy|reserve|approved|admin|trusted|\bvip\b|member|condition|postage|\bpost\b|payment|paypal|pay\s*id|\bgns\b|g\s*&\s*s|increment|bidding|\brules?\b|minimum|\bmin\b|\bstep\b|\bbids?\b|^#|insurance|tracked|mailer|envelope|messaging|confidence|legend|read all|posting out|to pay|failing|failure|removal|\bqld\b|\bnsw\b|\bvic\b|\bwa\b|\bsa\b|\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}|\d\s*(am|pm)\b|see (more|less|pictures)|as shown|^\s*(standard|express|registered|regular|parcel|signature)\b|\bexpress\b.*\d|\bstandard\b.*\d|shipping|pick\s*-?\s*up|\bcollect(ion)?\b|\$\s*\d|please see|see (the )?(photos?|pics?|pictures?|images?)|photos? (for|of)\b|pics? (for|of)\b|·|^\d+\s*(m|h|d|w|mins?|hrs?)$/i;
+  const BOILER = /auction|\bends?\b|\bhours?\b|tonight|finish|anti\s*-?\s*snipe|beware|scam|enjoy|reserve|approved|admin|trusted|\bvip\b|member|condition|postage|\bpost\b|payment|paypal|pay\s*id|\bgns\b|g\s*&\s*s|increment|bidding|\brules?\b|minimum|\bmin\b|\bstep\b|\bbids?\b|^#|insurance|tracked|mailer|envelope|messaging|confidence|legend|read all|posting out|to pay|failing|failure|removal|\bqld\b|\bnsw\b|\bvic\b|\bwa\b|\bsa\b|\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}|\d\s*(am|pm)\b|see (more|less|pictures)|as shown|^\s*(standard|express|registered|regular|parcel|signature)\b|\bexpress\b.*\d|\bstandard\b.*\d|shipping|pick\s*-?\s*up|\bcollection only\b|\bcollect from\b|\$\s*\d|please see|see (the )?(photos?|pics?|pictures?|images?)|photos? (for|of)\b|pics? (for|of)\b|·|^\d+\s*(m|h|d|w|mins?|hrs?)$/i;
   const SEPARATOR = /^[\s_\-.=*~•·]*$/;
   const PUBLISHER = /^(wizards of the coast|wotc|the pok[eé]mon company|pok[eé]mon tcg|pok[eé]mon)$/i;
 
@@ -192,8 +193,26 @@
     return picked.join(' ');
   }
 
+  // "Pokémon – Reshiram", "Set: Legendary Treasures", "Card Number – RC22/RC25": a details list.
+  function detailFields(postLines) {
+    const out = {};
+    for (const l of postLines) {
+      const c = clean(l).replace(/^[^\wé]+/, '');
+      const m = c.match(/^([a-zé][a-zé .]{0,18}?)\s*(?:[–—:]|\s-\s|-\s)\s*(\S.*)$/i);
+      if (!m) continue;
+      const k = m[1].toLowerCase().trim(), v = m[2].trim();
+      if (/^(pok[eé]mon|card|card name|name|character|item|product)$/.test(k)) out.name = out.name || v;
+      else if (/^(set|set name|expansion|series)$/.test(k)) out.set = out.set || v;
+      else if (/^(card )?(number|no\.?|#)$/.test(k)) out.number = out.number || v;
+    }
+    return out;
+  }
+  const titleCase = t => t.toLowerCase().replace(/(^|[\s(\/-])(\S)/g, (m, a, b) => a + b.toUpperCase())
+    .replace(/\b(etb|sar|sir|ir|ar|ex|gx|vmax|vstar|upc|tcg|psa|bgs|cgc|chr|tg|hr|ur|ssp|1st|rc|sv|swsh)\b/gi, w => w.toUpperCase());
+
   function parseCard(postLines) {
     const text = postLines.join('\n');
+    const f = detailFields(postLines);
     const g = text.match(/\b(PSA|BGS|CGC|TAG|ACE|SGC|BECKETT)\s*(\d{1,2}(?:\.\d)?)\b/i);
     const grade = g ? `${g[1].toUpperCase()} ${g[2]}` : '';
     let source = '';
@@ -203,11 +222,11 @@
       const parts = line.split(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]|!{2,}|\s[-–|]\s/u);
       source = clean(parts.find(p => p.includes(g[0])) || line).replace(/^(?:.{0,30}?\b)?auction\b(?:\s*(?:lot|#|no\.?)\s*\d+)?\s*[-–:|]\s*/i, '');
     }
-    else source = titleFromBlocks(postLines);
+    else source = f.name || titleFromBlocks(postLines);
     let name = source.replace(g ? g[0] : '', ' ').replace(/(?:^|\s)#?(?:[A-Z]{1,4})?\d{1,3}\s*\/\s*(?:[A-Z]{1,4})?\d{1,3}(?=\s|$)/gi, ' ').replace(/[:–\-|]+/g, ' ').replace(NOISE, ' ').replace(/[^\w\s'.#/&é-]/g, ' ').replace(/\s+/g, ' ').trim();
-    name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
-      .replace(/\b(etb|sar|sir|ir|ar|ex|gx|vmax|vstar|upc|tcg|psa|bgs|cgc|chr|tg|hr|ur|ssp|1st)\b/gi, w => w.toUpperCase());
-    return { grade, cardName: name };
+    name = titleCase(name);
+    const setName = f.set ? titleCase(clean(f.set).replace(/\s*[–—-]\s*/g, ' ')) : '';
+    return { grade, cardName: name, setName, detailNumber: f.number ? cardNumber(f.number) || f.number.toUpperCase() : '' };
   }
 
   // Postage: the cheapest price listed in the postage section, skipping insurance amounts.
@@ -217,7 +236,7 @@
     const prices = [];
     for (const l of postLines.slice(start, start + 8)) {
       if (prices.length && /payment|paypal|pay\s*id|bidding|increment/i.test(l)) break;
-      if (/insur|STC|combined|optional|signature|\+\s*\$/i.test(l)) continue;
+      if (/insur|STC|combined|optional|signature|extra cover|\+\s*\$/i.test(l)) continue;
       for (const m of l.matchAll(/\$\s*(\d[\d,]*(?:\.\d{2})?)/g)) prices.push(num(m[1]));
     }
     if (/free\s*(post|shipping)/i.test(postLines.slice(start, start + 3).join(' ')) && !prices.length) return 0;
@@ -252,10 +271,12 @@
       else if (/reserve/i.test(postText)) hasReserve = true;
     }
 
+    const card = parseCard(postLines);
+    card.cardNumber = card.detailNumber || cardNumber(postText);
+    delete card.detailNumber;
     return {
       title: clean(postLines[0] || ''),
-      ...parseCard(postLines),
-      cardNumber: cardNumber(postText),
+      ...card,
       postage: parsePostage(postLines),
       startBid: parseMoney(postText, /(?:start(?:ing)?(?:\s*bid)?|\bsb)\s*[:\-@]?\s*\$\s*(\d[\d,]*)/i),
       buyNow: parseMoney(postText, /(?:buy\s*now|\bbin)\s*[:\-@]?\s*\$\s*(\d[\d,]*)/i),

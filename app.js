@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.17.1';
+  const SITE_VERSION = '0.17.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -230,7 +230,8 @@ function countdownText(iso) {
 
   // The number as sellers write it in eBay titles: "RC22" for lettered numbers, "113/114" otherwise.
   const searchNo = n => !n ? '' : /[a-z]/i.test(n) ? n.split('/')[0] : n;
-  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${searchNo(a.cardNumber)} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
+  // Card name plus its number; without a number, the set name narrows it down instead.
+  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
   // Does an eBay listing title show this card's number? ("RC22/RC25" matches "RC22", "rc 22", "RC22/RC25")
   function sameNumber(title, n) {
     const [first, second] = n.split('/');
@@ -357,7 +358,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     return `
     <article class="slab${cd.ended ? ' ended' : ''}" data-id="${a.id}">
       <div class="label">
-        <span class="name">${esc(a.cardName || a.title || 'Untitled auction')}${a.cardNumber ? ` <small class="cardno">${esc(a.cardNumber)}</small>` : ''}</span>
+        <span class="name">${esc(a.cardName || a.title || 'Untitled auction')}${a.cardNumber ? ` <small class="cardno">${esc(a.cardNumber)}</small>` : ''}${a.setName ? `<small class="setname">${esc(a.setName)}</small>` : ''}</span>
         <span class="label-end"><span class="grade">${esc(a.grade || '')}</span><button type="button" class="x" data-act="remove-now" aria-label="Remove ${esc(a.cardName || 'auction')}" title="Remove">✕</button></span>
       </div>
       <div class="window">
@@ -399,6 +400,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           <div class="fields" style="margin-top:8px">
             <label style="grid-column:1/-1">Title<input data-field="cardName" value="${esc(a.cardName || '')}"></label>
             <label>Grade<input data-field="grade" value="${esc(a.grade || '')}" placeholder="PSA 10"></label>
+            <label>Set<input data-field="setName" value="${esc(a.setName || '')}" placeholder="Legendary Treasures"></label>
             <label>Card number<input data-field="cardNumber" value="${esc(a.cardNumber || '')}" placeholder="RC22/RC25"></label>
             <label>Current bid $<input data-field="currentBid" inputmode="decimal" value="${a.currentBid ?? ''}"></label>
             <label>Reserve $<input data-field="reserve" inputmode="decimal" value="${a.reserve ?? ''}" placeholder="${a.hasReserve === false ? 'No reserve' : ''}"></label>
@@ -499,6 +501,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (parsed.endsAt && !edited.endsAt) { out.endsAt = parsed.endsAt; out.zone = parsed.zone; }
     if (!edited.qty) out.qty = lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
+    if (!edited.setName && parsed.setName) out.setName = parsed.setName;
     if (Array.isArray(a.allComments) && !a.manualBid) {
       const bids = a.allComments.map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
       const top = bids.reduce((m, x) => (!m || x.amount > m.amount ? x : m), null);
@@ -628,14 +631,14 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         const text = (card.querySelector('[data-field="repaste"]')?.value || '').trim();
         const typedBid = numOrNull(card.querySelector('[data-field="currentBid"]').value);
         const val = f => card.querySelector(`[data-field="${f}"]`).value.trim();
-        const patch = { currentBid: typedBid, manualBid: typedBid !== a.currentBid, cardName: val('cardName'), grade: val('grade'), cardNumber: val('cardNumber').toUpperCase(),
+        const patch = { currentBid: typedBid, manualBid: typedBid !== a.currentBid, cardName: val('cardName'), grade: val('grade'), cardNumber: val('cardNumber').toUpperCase(), setName: val('setName'),
           reserve: numOrNull(val('reserve')), zone: val('zone'), qty: numOrNull(val('qty')), ebaySold: numOrNull(val('marketValue')) };
         if (patch.reserve != null) patch.hasReserve = true;
         const ends = wallToIso(val('ends'), patch.zone);
         if (ends) { patch.endsAt = ends; patch.extendedTo = null; }
         // Remember what you changed so later updates from Facebook don't overwrite it.
         const edited = { ...(a.edited || {}) };
-        for (const f of ['cardName', 'grade', 'reserve', 'cardNumber']) if (patch[f] !== a[f] && !(patch[f] === '' && a[f] == null)) edited[f] = true;
+        for (const f of ['cardName', 'grade', 'reserve', 'cardNumber', 'setName']) if (patch[f] !== a[f] && !(patch[f] === '' && a[f] == null)) edited[f] = true;
         if (ends && ends !== a.endsAt) edited.endsAt = true;
         if (patch.qty !== (a.qty > 1 ? a.qty : null)) edited.qty = true;
         patch.edited = edited;

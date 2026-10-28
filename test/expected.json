@@ -1,0 +1,8 @@
+{
+  "1.txt": { "card": "Vintage 1995 Skeleton Warriors Bundle" },
+  "2.txt": { "card": "1 X Chaos Rising Booster Box Case Factory Sealed" },
+  "3.txt": { "card": "E Series Skyridge Kakuna" },
+  "4-reshiram.txt": { "card": "Reshiram", "set": "Legendary Treasures Radiant Collection", "number": "RC22/RC25", "reserve": "none", "ends": "2026-10-28T10:00:00.000Z" },
+  "5-prismatic.txt": { "card": "Prismatic ETB", "reserve": 230 },
+  "6-gengar.txt": { "card": "Gengar", "grade": "PSA 10", "reserve": "none" }
+}
