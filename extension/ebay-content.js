@@ -23,10 +23,12 @@
     if (!a) return badge('Pokémon Auction Tracker: that auction is no longer in your tracker.');
     const sales = EbaySold.parseSold(document.documentElement.outerHTML, query, a.grade);
     const s = EbaySold.summarise(sales);
-    const result = s.count ? { status: 'ok', ...s } : { status: 'none' };
+    // Every matching sale with its date, so the tracker can work out the average itself (e.g. only recent sales).
+    const list = sales.slice(0, 60).map(x => ({ price: x.price, soldDate: x.soldDate, title: x.title, url: x.url, currency: x.currency }));
+    const result = s.count ? { status: 'ok', ...s, sales: list } : { status: 'none', sales: list };
     chrome.runtime.sendMessage({ type: 'ebay-result', id, result: { ...result, query, checkedAt: new Date().toISOString() } });
     badge(s.count
-      ? `Saved to tracker: eBay average $${s.average.toLocaleString('en-AU')} from the last ${s.count} sold.`
+      ? `Saved ${list.length} sold listings to the tracker. It works out the average from the recent ones.`
       : 'Pokémon Auction Tracker: no matching sold listings on this page. Try other search words on the card.');
   }
   setTimeout(run, 1500); // let the results finish loading

@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.16.0';
+  const SITE_VERSION = '0.17.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -162,7 +162,51 @@ function countdownText(iso) {
 
   // Price you'd actually pay (bid + postage) against the last eBay sale.
   // A price typed in by hand wins over the automatic eBay lookup.
-  const marketPrice = a => a.ebaySold ?? (a.ebayAuto && a.ebayAuto.currency !== 'USD' ? a.ebayAuto.price : null) ?? null;
+  // Market value: a value you typed in Fix details wins; otherwise the eBay AU average times the quantity.
+  const marketPrice = a => { if (a.ebaySold != null) return a.ebaySold; const m = ebayMarket(a); return m ? m.average * qtyOf(a) : null; };
+  const qtyOf = a => (a.qty > 1 ? a.qty : 1);
+
+  // eBay AU average, worked out from the sales the extension saved (with their sold dates):
+  // the 10 most recent sales from the 90 days before the auction was posted (widened to 180 or
+  // 365 days if there are fewer than 3), dropping the highest and lowest when there are 5 or more.
+  const DAY = 86400e3;
+  function ebayMarket(a) {
+    const auto = a.ebayAuto || {};
+    const sales = (auto.sales || []).filter(s => s.currency !== 'USD' && s.price > 0).map(s => ({ ...s, t: Date.parse(s.soldDate) || null }));
+    if (!sales.length) return auto.average && auto.currency !== 'USD' ? { average: auto.average, count: auto.count, legacy: true } : null;
+    const ref = new Date(a.addedAt || auto.checkedAt || Date.now()).getTime();
+    let days = null, pool = [];
+    for (const w of [90, 180, 365]) { pool = sales.filter(s => s.t && s.t >= ref - w * DAY); days = w; if (pool.length >= 3) break; }
+    if (pool.length < 3) { pool = sales; days = null; }
+    const used = [...pool].sort((x, y) => (y.t || 0) - (x.t || 0)).slice(0, 10);
+    const byPrice = [...used].sort((x, y) => x.price - y.price);
+    const dropped = byPrice.length >= 5 ? [byPrice[0], byPrice[byPrice.length - 1]] : [];
+    const kept = byPrice.length >= 5 ? byPrice.slice(1, -1) : byPrice;
+    const average = Math.round(kept.reduce((t, x) => t + x.price, 0) / kept.length);
+    const times = used.map(x => x.t).filter(Boolean);
+    return { average, used, kept, dropped, days, older: sales.length - pool.length, skipped: pool.length - used.length,
+      from: times.length ? Math.min(...times) : null, to: times.length ? Math.max(...times) : null, count: used.length };
+  }
+  const shortDate = t => new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  function ebayExplain(a) {
+    const m = ebayMarket(a);
+    if (!m) return '';
+    const q = qtyOf(a);
+    const total = q > 1 ? ` × ${q} items = <strong>${money(m.average * q)}</strong>` : '';
+    if (m.legacy) return `<span class="hint">eBay AU average <strong>${money(m.average)}</strong>${total} from the last ${m.count} sold. Open "eBay AU sold" again to recalculate it using sale dates.</span>`;
+    const span = m.from ? `${shortDate(m.from)} – ${shortDate(m.to)}` : 'dates unknown';
+    const how = [
+      m.days ? `Used the ${m.count} most recent eBay AU sales from the ${m.days} days before this auction was posted (${span}).` : `Fewer than 3 sales in the last year, so used all ${m.count} found (${span}).`,
+      m.older ? `Left out ${m.older} older sale${m.older === 1 ? '' : 's'}.` : '',
+      m.skipped ? `Left out ${m.skipped} more from that period beyond the 10 most recent.` : '',
+      m.dropped.length ? `Dropped the highest (${money(m.dropped[1].price)}) and lowest (${money(m.dropped[0].price)}) so one odd sale doesn't skew it.` : '',
+      `Average of the remaining ${m.kept.length}: ${money(m.average)}.`,
+      q > 1 ? `This lot has ${q} items, so the market value is ${money(m.average)} × ${q} = ${money(m.average * q)}.` : '',
+    ].filter(Boolean).join(' ');
+    const list = m.used.map(x => `<li${m.dropped.includes(x) ? ' class="dropped"' : ''}>${x.t ? shortDate(x.t) : '?'} · ${money(x.price)} · ${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title || 'listing')}</a>` : esc(x.title || '')}</li>`).join('');
+    return `<span class="hint">eBay AU average <strong>${money(m.average)}</strong>${total} · ${m.count} sales, ${span}</span>
+      <details class="how"><summary>How this was worked out</summary><p class="hint">${how}</p><ol class="sales">${list}</ol></details>`;
+  }
   const endOf = a => a.extendedTo || a.endsAt;
   function verdict(a) {
     const market = marketPrice(a);
@@ -180,7 +224,7 @@ function countdownText(iso) {
     return { cls: 'bad', text: `Over market by ${gap} (${pct}%)`, ratio, total };
   }
 
-  function ebayQuery(a) { return (a.ebayQuery || `${a.cardName || ''} ${a.grade || ''}`).trim(); }
+  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${a.grade || ''}`).trim(); }
   function marketLinks(a) {
     const q = encodeURIComponent(ebayQuery(a));
     return [
@@ -326,7 +370,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
           ${v.ratio != null ? `<div class="bar" title="Line marks the eBay AU price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
-          ${autoText ? `<span class="hint">${autoText}${auto.checkedAt ? ' · checked ' + esc(ago(auto.checkedAt)) : ''}</span>` : ''}
+          ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
+          ${ebayMarket(a) ? ebayExplain(a) : autoText ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         ${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" class="update-row" data-act="update-now">↻ Update bids</button>' : ''}
@@ -340,6 +385,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
             <label>Current bid $<input data-field="currentBid" inputmode="decimal" value="${a.currentBid ?? ''}"></label>
             <label>Reserve $<input data-field="reserve" inputmode="decimal" value="${a.reserve ?? ''}" placeholder="${a.hasReserve === false ? 'No reserve' : ''}"></label>
             <label>Ends<input data-field="ends" type="datetime-local" value="${isoToWall(a.endsAt, a.zone || 'QLD')}"></label>
+            <label>Quantity in lot<input data-field="qty" inputmode="numeric" value="${a.qty > 1 ? a.qty : ''}" placeholder="1"></label>
+            <label>Market value $<input data-field="marketValue" inputmode="decimal" value="${a.ebaySold ?? ''}" placeholder="eBay AU average"></label>
             <label>Time zone<select data-field="zone">${ZONE_CHOICES.map(([z, t]) => `<option value="${z}"${(a.zone || 'QLD') === z ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
           </div>
           <div class="foot" style="margin-top:8px">
@@ -363,7 +410,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const cd = countdownText(endOf(a));
     const v = verdict(a);
     return `<div class="found-row" data-id="${a.id}">
-      <div class="thumb">${a.image ? `<img src="${esc(a.image)}" alt="">` : ''}</div>
+      <div class="thumb">${photos(a)[0] ? `<img src="${esc(photos(a)[0])}" alt="">` : ''}</div>
       <div class="found-main">
         <strong>${esc(a.cardName || a.title || 'Untitled auction')}${a.grade ? ' · ' + esc(a.grade) : ''}</strong>
         <span class="hint">${money(a.currentBid ?? a.startBid)}${a.seller ? ' · ' + esc(a.seller) : ''} · <span class="countdown" data-ends="${endOf(a) || ''}">${cd.text}</span>${a.postUrl ? ` · <a href="${esc(a.postUrl)}" target="_blank" rel="noopener">post ↗</a>` : ''}</span>
@@ -390,19 +437,19 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const now = Date.now();
     const live = auctions.filter(a => isTracked(a) && (!endOf(a) || new Date(endOf(a)) > now));
     const rows = live.map(a => {
-      const bid = a.currentBid ?? a.startBid;
       const avg = marketPrice(a);
+      const bid = a.currentBid ?? a.startBid ?? (avg ? 0 : null); // no bids yet counts as $0
       return { a, bid, avg, diff: bid != null && avg ? avg - bid : null, pct: bid != null && avg ? (avg - bid) / avg : null };
     }).sort((x, y) => (y.pct ?? -9) - (x.pct ?? -9));
     $('underList').innerHTML = rows.length ? rows.map(({ a, bid, avg, diff, pct }) => {
       const cd = countdownText(endOf(a));
-      const diffCell = diff == null ? (avg ? 'No bids yet' : `<a href="${esc(marketLinks(a)[0][1])}" target="_blank" rel="noopener">eBay AU sold ↗</a>`)
+      const diffCell = diff == null ? (avg ? '' : `<a href="${esc(marketLinks(a)[0][1])}" target="_blank" rel="noopener">eBay AU sold ↗</a>`)
         : `<span class="${diff >= 0 ? 'diff-good' : 'diff-bad'}">${diff >= 0 ? money(diff) + ' under' : money(-diff) + ' over'} (${Math.round(Math.abs(pct) * 100)}%)</span>`;
       return `<tr>
-        <td><div class="under-item"><div class="thumb">${a.image ? `<img src="${esc(a.image)}" alt="">` : ''}</div>
+        <td><div class="under-item" data-id="${a.id}"><div class="thumb">${photos(a)[0] ? `<img src="${esc(photos(a)[0])}" alt="View photos" data-act="zoom" data-i="0" role="button">` : ''}</div>
           <span>${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">${esc(a.cardName || 'Untitled auction')}</a>` : esc(a.cardName || 'Untitled auction')}${a.grade ? ' · ' + esc(a.grade) : ''}</span></div></td>
-        <td class="num">${money(bid)}</td>
-        <td class="num">${avg ? money(avg) : '—'}</td>
+        <td class="num">${money(bid)}${a.currentBid == null && a.startBid == null ? '<br><small class="hint">no bids yet</small>' : ''}</td>
+        <td class="num">${avg ? money(avg) + (qtyOf(a) > 1 && a.ebaySold == null ? `<br><small class="hint">${qtyOf(a)} × ${money(avg / qtyOf(a))}</small>` : '') : '—'}</td>
         <td class="num">${diffCell}</td>
         <td class="num"><span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span></td>
       </tr>`;
@@ -412,6 +459,12 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   // Facebook auctions are re-read from the saved post text and comments every time the page loads,
   // so improvements to the reader apply straight away, without updating the extension.
   // Anything you corrected in "Fix details" is kept.
+  // "2 x Prismatic ETB", "Prismatic ETB x3", "Lot of 4 ..." -> how many of the item are in the lot.
+  function lotQty(title) {
+    const m = title.match(/^\s*(\d{1,2})\s*[x×]\s+\S/i) || title.match(/\S\s+[x×]\s?(\d{1,2})\b/i) || title.match(/\blot of (\d{1,2})\b/i);
+    const n = m ? +m[1] : 1;
+    return n >= 2 && n <= 50 ? n : null;
+  }
   function derive(a) {
     if (a.source !== 'facebook' || !a.raw) return a;
     const out = { ...a };
@@ -426,6 +479,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
     }
     if (parsed.endsAt && !edited.endsAt) { out.endsAt = parsed.endsAt; out.zone = parsed.zone; }
+    if (!edited.qty) out.qty = lotQty(out.cardName || '');
     if (Array.isArray(a.allComments) && !a.manualBid) {
       const bids = a.allComments.map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
       const top = bids.reduce((m, x) => (!m || x.amount > m.amount ? x : m), null);
@@ -527,6 +581,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const step = d => { lb.i = (lb.i + d + lb.pics.length) % lb.pics.length; showLb(); };
     $('lbPrev').addEventListener('click', e => { e.stopPropagation(); step(-1); });
     $('lbNext').addEventListener('click', e => { e.stopPropagation(); step(1); });
+    $('underList').addEventListener('click', e => {
+      if (e.target.dataset.act !== 'zoom') return;
+      const a = auctions.find(x => x.id === e.target.closest('[data-id]').dataset.id);
+      if (a) openLightbox(photos(a), 0, a);
+    });
     $('lightbox').addEventListener('click', e => { if (e.target.id !== 'lbImg') $('lightbox').hidden = true; });
     document.addEventListener('keydown', e => {
       if ($('lightbox').hidden) return;
@@ -551,7 +610,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         const typedBid = numOrNull(card.querySelector('[data-field="currentBid"]').value);
         const val = f => card.querySelector(`[data-field="${f}"]`).value.trim();
         const patch = { currentBid: typedBid, manualBid: typedBid !== a.currentBid, cardName: val('cardName'), grade: val('grade'),
-          reserve: numOrNull(val('reserve')), zone: val('zone') };
+          reserve: numOrNull(val('reserve')), zone: val('zone'), qty: numOrNull(val('qty')), ebaySold: numOrNull(val('marketValue')) };
         if (patch.reserve != null) patch.hasReserve = true;
         const ends = wallToIso(val('ends'), patch.zone);
         if (ends) { patch.endsAt = ends; patch.extendedTo = null; }
@@ -559,6 +618,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         const edited = { ...(a.edited || {}) };
         for (const f of ['cardName', 'grade', 'reserve']) if (patch[f] !== a[f] && !(patch[f] === '' && a[f] == null)) edited[f] = true;
         if (ends && ends !== a.endsAt) edited.endsAt = true;
+        if (patch.qty !== (a.qty > 1 ? a.qty : null)) edited.qty = true;
         patch.edited = edited;
         if (text) {
           const p = P.parse(text);
