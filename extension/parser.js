@@ -235,6 +235,27 @@
     return { grade, cardName: name, setName, detailNumber: f.number ? cardNumber(f.number) || f.number.toUpperCase() : '' };
   }
 
+  // Bidding rules: "Minimum $1 increments up to $50", "Minimum $5 increments after $50",
+  // "Bids to be in full/whole dollar bids". Gives the step below and from the threshold.
+  function bidRules(text) {
+    const out = {};
+    for (const line of text.split('\n')) {
+      if (!/increment/i.test(line)) continue;
+      const amounts = [...line.matchAll(/\$\s*(\d+(?:\.\d+)?)/g)].map(m => +m[1]);
+      const step = /\bno min(imum)?\b/i.test(line) ? 1 : amounts[0];
+      if (step == null) continue;
+      const at = /\bno min(imum)?\b/i.test(line) ? amounts[0] : amounts[1];
+      if (at != null && /\b(up ?to|until|below|under|before|to)\b/i.test(line)) { out.incLow = step; out.incAt = at; }
+      else if (at != null && /\b(after|from|over|above|onwards?|beyond)\b/i.test(line)) { out.incHigh = step; out.incAt = out.incAt ?? at; }
+      else if (out.incLow == null) out.incLow = out.incHigh = step;
+    }
+    if (out.incLow == null && out.incHigh == null) return {};
+    if (out.incLow == null) out.incLow = 1;
+    if (out.incHigh == null) out.incHigh = out.incLow;
+    out.wholeDollars = /\b(whole|full)[\s/]*(whole|full)?\s*dollar/i.test(text);
+    return out;
+  }
+
   // Anti-snipe rule: "+5 mins within the last 5 mins", "Any bid within the final 2 minutes extends
   // the auction by an additional 3 minutes". Gives the window and how much each late bid adds (default 5 and 5).
   function antiSnipeRule(text) {
@@ -304,6 +325,7 @@
       hasReserve, reserve,
       antiSnipe: /anti[\s-]*snipe/i.test(postText),
       ...antiSnipeRule(postText),
+      ...bidRules(postText),
       ...parseEnd(postLines, now),
       currentBid: top ? top.amount : null,
       topBidder: top ? top.name : null,

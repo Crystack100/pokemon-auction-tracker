@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.4';
+  const SITE_VERSION = '0.19.5';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -538,13 +538,15 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.example ? '<span class="example-tag">Example</span>' : ''}
           <span class="k">${a.currentBid == null && a.startBid != null ? 'Starting bid' : cd.ended ? 'Final bid' : 'Current bid'}</span>
           <span class="v">${money(a.currentBid ?? a.startBid ?? 0)}</span>
-          <span class="who">${a.lateComments ? `${a.lateComments} comment${a.lateComments === 1 ? '' : 's'} after the end not counted · ` : ''}${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
+          <span class="who">${a.lateComments ? `${a.lateComments} comment${a.lateComments === 1 ? '' : 's'} after the end not counted · ` : ''}${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.brokenBids ? ` (${a.brokenBids} under the minimum step not counted)` : ''}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
           <span class="pill ${v.cls}">${v.text}</span>
         </div>
       </div>
       <div class="body">
         <dl>
           <dt>Reserve</dt><dd${reserveMet == null ? '' : ` class="${reserveMet ? 'met' : 'unmet'}" title="${reserveMet ? 'Reserve met' : 'Reserve not met yet'}"`}>${reserve}</dd>
+          ${a.nextBid != null && !countdownText(endOf(a)).ended ? `<dt>Next bid</dt><dd title="${esc(`$${a.incLow} steps${a.incAt != null && a.incHigh !== a.incLow ? ` up to $${a.incAt}, then $${a.incHigh}` : ''}${a.wholeDollars ? ', whole dollars' : ''}`)}">${money(a.nextBid)} or more</dd>` : ''}
+          ${a.incLow != null ? `<dt>Increments</dt><dd>$${a.incLow}${a.incAt != null && a.incHigh !== a.incLow ? ` to $${a.incAt}, then $${a.incHigh}` : ''}${a.wholeDollars ? ' · whole $' : ''}</dd>` : ''}
           ${a.antiSnipe ? `<dt>Anti-snipe</dt><dd>+${a.antiSnipeMins || 5} min for bids in the last ${a.antiSnipeWindow || a.antiSnipeMins || 5} min</dd>` : ''}
         </dl>
         <div class="ends">
@@ -696,7 +698,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     }
     // Graded only when the post itself says so: clear a grade an older reader saved.
     if (!edited.grade) out.grade = parsed.grade || '';
-    for (const f of ['title', 'cardName', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe', 'antiSnipeMins', 'antiSnipeWindow']) {
+    for (const f of ['title', 'cardName', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe', 'antiSnipeMins', 'antiSnipeWindow', 'incLow', 'incHigh', 'incAt', 'wholeDollars']) {
       if (edited[f] || edited[f === 'hasReserve' ? 'reserve' : f]) continue;
       if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
     }
@@ -711,17 +713,29 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     let endMs = endsMs;
     out.extendedTo = null;
     const comments = Array.isArray(a.allComments) ? a.allComments : null;
-    if (endMs && comments) {
-      const timedBids = comments.filter(c => c.at && P.bidAmount(c.text) != null).sort((x, y) => x.at - y.at);
-      // Anti-snipe: each bid (higher than the one before) placed within the last few minutes before the
-      // current end adds the stated minutes to the end, so later bids are checked against the new end.
+    // Bidding rules from the post ("Minimum $1 increments up to $50, $5 after, whole dollars"):
+    // going through the bids in the order they were placed, a bid only counts if it beats the
+    // highest so far by the minimum step (and is whole dollars). Others are left out.
+    const rules = out.incLow != null;
+    const stepAt = high => (out.incAt != null && high >= out.incAt ? out.incHigh : out.incLow);
+    const minNext = high => high == null ? (out.startBid || (rules ? 1 : 0)) : high + (rules ? stepAt(high) : 0.01);
+    let valid = [], broke = 0;
+    if (comments) {
+      let high = null;
+      const order = comments.map((c, i) => ({ c, i, amount: P.bidAmount(c.text) })).filter(x => x.amount != null)
+        .sort((x, y) => (x.c.at && y.c.at ? x.c.at - y.c.at : x.i - y.i));
+      for (const x of order) {
+        const ok = x.amount >= minNext(high) && !(rules && out.wholeDollars && x.amount % 1);
+        if (!ok) { if (rules && (high == null || x.amount > high)) broke++; continue; }
+        high = x.amount; valid.push(x);
+      }
+    }
+    // Anti-snipe: each counted bid placed within the last few minutes before the current end adds the
+    // stated minutes to the end, so later bids are checked against the new end.
+    if (endMs && out.antiSnipe) {
       const add = (out.antiSnipeMins || 5) * 60e3, win = (out.antiSnipeWindow || out.antiSnipeMins || 5) * 60e3;
-      let high = -1;
-      if (out.antiSnipe) for (const c of timedBids) {
-        const amt = P.bidAmount(c.text);
+      for (const { c } of valid.filter(x => x.c.at)) {
         if (c.at > endMs) break;
-        if (amt <= high) continue;
-        high = amt;
         if (c.at >= endMs - win) endMs += add;
       }
       if (endMs > endsMs) out.extendedTo = new Date(endMs).toISOString();
@@ -729,11 +743,13 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const inTime = c => !(endMs && c.at && c.at > endMs);
     out.lateComments = comments && endMs ? comments.filter(c => !inTime(c)).length : 0;
     if (comments && !a.manualBid) {
-      const bids = comments.filter(inTime).map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
-      const top = bids.reduce((m, x) => (!m || x.amount > m.amount ? x : m), null);
-      if (top) Object.assign(out, { currentBid: top.amount, topBidder: top.name });
+      const bids = valid.filter(x => inTime(x.c));
+      const top = bids[bids.length - 1];
+      if (top) Object.assign(out, { currentBid: top.amount, topBidder: top.c.name });
       out.bidCount = bids.length;
+      out.brokenBids = broke;
     }
+    out.nextBid = rules ? minNext(out.currentBid ?? null) : null;
     return out;
   }
 
