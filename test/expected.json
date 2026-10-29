@@ -6,6 +6,6 @@
   "5-prismatic.txt": {"card": "Prismatic ETB", "reserve": 230},
   "6-gengar.txt": {"card": "Gengar", "grade": "PSA 10", "reserve": "none"},
   "7-oneline.txt": {"card": "Reshiram Legendary Treasures", "number": "RC22/RC25", "reserve": "none"},
-  "8-greninja-box.txt": {"card": "30th Anniversary Greninja EX Box X2", "grade": ""},
+  "8-greninja-box.txt": {"grade": ""},
   "9-cgc-slab.txt": {"grade": "CGC 10"}
 }
