@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.5';
+  const SITE_VERSION = '0.19.6';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -989,6 +989,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       chrome.storage.onChanged.addListener(c => { if (c.lastScan) showScan(c.lastScan.newValue); });
       $('autoRefresh').addEventListener('change', e => saveSetting({ autoUpdate: e.target.checked }));
     }
+    // The paste-a-post form starts hidden so it doesn't flash on load; without the extension it's the way in.
+    if (!inExtension) $('bench').hidden = false;
     const onSite = !(window.chrome && window.chrome.storage && window.chrome.runtime && window.chrome.runtime.id);
     $('verBadge').textContent = `${onSite ? 'Site v' + SITE_VERSION : 'Built-in page v' + SITE_VERSION} · Extension ${inExtension ? 'v' + chrome.runtime.getManifest().version : 'not connected'}`;
     if (onSite && !inExtension) $('noExt').hidden = false;
