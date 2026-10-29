@@ -15,11 +15,15 @@
     if (/\/(posts|permalink)\/|multi_permalinks/.test(location.href)) {
       document.querySelectorAll('[role="dialog"], [role="main"]').forEach(d => cands.add(d));
     }
-    const list = [...cands].filter(el => !isComment(el) && !el.closest('[aria-label^="Comment by"], [aria-label^="Reply by"]'));
+    if (/^\/messages\b/.test(location.pathname)) return [];
+    const list = [...cands].filter(el => !isComment(el) && !inChat(el) && !el.closest('[aria-label^="Comment by"], [aria-label^="Reply by"]'));
     return list.filter(el => !list.some(o => o !== el && o.contains(el) && !o.matches('[role="main"], [role="dialog"]') ));
   }
 
-  function isComment(el) { return /^(Comment|Reply) by /i.test(el.getAttribute('aria-label') || ''); }
+  // Messenger chats (the chat windows on Facebook): a post shared in a chat is a message, not an auction.
+  const CHAT = '[role="grid"], [role="row"], [role="gridcell"], [aria-label^="Messages in conversation" i], [aria-label^="Chat" i], [aria-label*="Messenger" i]';
+  function inChat(el) { return !!(el.closest(CHAT) || el.querySelector('[role="textbox"][aria-label^="Message" i], [aria-label^="Messages in conversation" i]')); }
+    function isComment(el) { return /^(Comment|Reply) by /i.test(el.getAttribute('aria-label') || ''); }
 
   function postText(post) {
     const msg = post.querySelector('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]');
