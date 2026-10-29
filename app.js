@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.0';
+  const SITE_VERSION = '0.19.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -270,7 +270,8 @@ function countdownText(iso) {
       // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
       ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
-      ['PriceCharting', a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)],
+      // Opening PriceCharting from here also saves its price to the card (read by the extension on that page).
+      ['PriceCharting', (a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)) + (inExtension ? '#pat=' + a.id : '')],
     ];
   }
 
@@ -378,7 +379,7 @@ function countdownText(iso) {
   }
   function pcQuery(a) {
     if (a.pcQuery) return a.pcQuery;
-    const name = (a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '').replace(/\b(PSA|BGS|CGC|TAG|ACE|SGC)\s*[\d.]+\b/gi, '').replace(/\bETB\b/i, 'Elite Trainer Box');
+    const name = (a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '').replace(/\b(PSA|BGS|CGC|TAG|ACE|SGC)\s*[\d.]+\b/gi, '').replace(/\bETB\b/i, 'Elite Trainer Box').replace(/\b(factory sealed|sealed|brand new|english)\b/gi, '');
     // PriceCharting writes card numbers as "#RC22" or "#113", so only the first part is searched.
     return `${name} ${a.cardNumber ? a.cardNumber.split('/')[0] : ''}`.replace(/\s+/g, ' ').trim();
   }
@@ -461,25 +462,43 @@ function countdownText(iso) {
       await save({ status: 'ok', query, ...product, rate: audPerUsd, checkedAt: new Date().toISOString() });
     } catch (e) {
       if (e.message === 'old-extension') { a.pcOld = true; return; }
-      await save({ status: 'error', query, error: e.message, checkedAt: new Date().toISOString() });
+      await save({ status: / 403$/.test(e.message) ? 'blocked' : 'error', query, error: e.message, checkedAt: new Date().toISOString() });
     } finally { pcBusy.delete(a.id); }
+  }
+  // A PriceCharting page you opened from a card: the extension saved its price table, read it here.
+  async function pcFromPage(a) {
+    const pg = a.pcPage;
+    if (!pg || (a.pc && a.pc.pageAt === pg.at)) return;
+    const doc = new DOMParser().parseFromString(pg.html || '', 'text/html');
+    const product = pcReadProduct(doc, pg.url);
+    const base = { source: 'page', pageAt: pg.at, query: pcQuery(a), checkedAt: pg.at };
+    const pc = product && Object.keys(product.prices).length ? { status: 'ok', ...base, ...product, rate: audPerUsd }
+      : { status: 'pick', ...base, url: pg.url };
+    const r = await chrome.storage.local.get('auction:' + a.id); const cur = r['auction:' + a.id];
+    if (cur) await chrome.storage.local.set({ ['auction:' + a.id]: { ...cur, pc } });
   }
   // Look up tracked auctions that have no PriceCharting price yet, or one older than 12 hours, one at a time.
   let pcRunning = false;
   async function pcQueue() {
     if (!inExtension || pcRunning) return;
+    if (!audPerUsd) await loadRate();
+    for (const a of auctions) if (a.pcPage) await pcFromPage(a);
     const extVer = (chrome.runtime.getManifest().version || '0').split('.').map(Number);
     if (extVer[0] === 0 && extVer[1] < 16) return; // needs extension 0.16.0
     pcRunning = true;
     try {
       if (!audPerUsd) await loadRate();
-      const due = auctions.filter(a => isTracked(a) && !a.example && (!a.pc || a.pc.query !== pcQuery(a) || Date.now() - Date.parse(a.pc.checkedAt) > 12 * 3600e3));
+      // Prices read from a page you opened, or checks PriceCharting refused, wait until the search words change.
+      const due = auctions.filter(a => isTracked(a) && !a.example && (!a.pc || a.pc.query !== pcQuery(a) ||
+        (a.pc.source !== 'page' && a.pc.status !== 'blocked' && !/ 403$/.test(a.pc.error || '') && Date.now() - Date.parse(a.pc.checkedAt) > 12 * 3600e3)));
       for (const a of due) { await pcLookup(a); await new Promise(r => setTimeout(r, 1500)); }
     } finally { pcRunning = false; }
   }
   function pcExplain(a) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
+    if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">PriceCharting doesn't allow automatic checks. Press "PriceCharting ↗" below once and its price is saved here.</span>`;
+    if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here.</span>`;
     if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
     if (pc.status === 'none') return `<span class="hint">No PriceCharting match for "${esc(pc.query)}". Change the search words in Fix details.</span>`;
     const p = pcPrice(a);

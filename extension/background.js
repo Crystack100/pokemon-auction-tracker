@@ -260,6 +260,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const url = TRACKER_URL;
     chrome.tabs.query({ url: TRACKER_URL + '*' }).then(([t]) => t ? chrome.tabs.update(t.id, { active: true }) : chrome.tabs.create({ url }));
   }
+  if (msg.type === 'pc-page') getAuction(msg.id).then(a => a && putAuction({ ...a, pcPage: { url: msg.url, html: String(msg.html).slice(0, 400000), at: new Date().toISOString() } }));
   if (msg.type === 'ebay-result') getAuction(msg.id).then(a => a && putAuction({ ...a, ebayAuto: msg.result }));
   if (msg.type === 'update-now') {
     (async () => {
