@@ -13,7 +13,8 @@
       ...document.querySelectorAll('[role="feed"] > div, div[aria-posinset], [role="article"]'),
     ]);
     if (/\/(posts|permalink)\/|multi_permalinks/.test(location.href)) {
-      document.querySelectorAll('[role="dialog"], [role="main"]').forEach(d => cands.add(d));
+      // The post's own pop-up or page, but not other pop-ups (emoji pickers, chats, menus).
+      document.querySelectorAll('[role="dialog"], [role="main"]').forEach(d => { if (hasPostBody(d)) cands.add(d); });
     }
     if (/^\/messages\b/.test(location.pathname)) return [];
     const list = [...cands].filter(el => !isComment(el) && !inChat(el) && !el.closest('[aria-label^="Comment by"], [aria-label^="Reply by"]'));
@@ -21,7 +22,13 @@
   }
 
   // Messenger chats (the chat windows on Facebook): a post shared in a chat is a message, not an auction.
-  const CHAT = '[role="grid"], [role="row"], [role="gridcell"], [aria-label^="Messages in conversation" i], [aria-label^="Chat" i], [aria-label*="Messenger" i]';
+  const CHAT = '[role="grid"], [role="row"], [role="gridcell"], [aria-label^="Messages in conversation" i], [aria-label^="Chat" i], [aria-label*="Messenger" i], [aria-label*="emoji" i], [aria-label*="sticker" i]';
+  const STORY = '[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]';
+  // A real post shows its text block, its comments, or a comment box.
+  function hasPostBody(el) {
+    if (/emoji|sticker|gif|chat|messenger|notification|menu|account|search/i.test(el.getAttribute('aria-label') || '')) return false;
+    return !!el.querySelector(`${STORY}, [aria-label^="Comment by"], [role="textbox"][aria-label*="comment" i], [role="textbox"][aria-label*="answer" i]`);
+  }
   function inChat(el) { return !!(el.closest(CHAT) || el.querySelector('[role="textbox"][aria-label^="Message" i], [aria-label^="Messages in conversation" i]')); }
     function isComment(el) { return /^(Comment|Reply) by /i.test(el.getAttribute('aria-label') || ''); }
 
@@ -289,7 +296,10 @@
     if (!location.pathname.startsWith('/groups/')) return; // Facebook changes pages without reloading
     // Only posts that look like auctions in the part you can see, plus any you already track.
     // Anything else can still be tracked with right-click → "Track this auction".
-    for (const post of posts()) {
+    const list = posts();
+    // Take away bars left on anything that isn't a post any more (a closed pop-up, a chat).
+    document.querySelectorAll('.pat-bar').forEach(b => { if (!list.some(p => p.contains(b))) b.remove(); });
+    for (const post of list) {
       const text = postText(post);
       const key = text && snapshotKey(post);
       if (text && (LOOKS_LIKE_AUCTION.test(text) || tracked.has(key))) ensureBar(post);
