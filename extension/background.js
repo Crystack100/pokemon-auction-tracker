@@ -73,7 +73,9 @@ async function onAuctionSeen(p, fromTabId, track) {
   // Photos: keep every photo seen from any reading (Facebook only shows some at a time), one copy each.
   // How many photos each kind of reading found, so a missing photo can be traced to its source.
   a.photoLog = { ...(a.photoLog || {}), [p.source || 'facebook']: { found: (p.images || []).length, at: p.seenAt } };
-  if (p.images && p.images.length) {
+  // Photos from the background check can include other posts on the same page, so only photos
+  // read from the post itself (and its own album below) are kept.
+  if (p.images && p.images.length && p.source !== 'background') {
     const photoId = u => (u.split('?')[0].split('/').pop() || u);
     const fresh = [...(a.images || []), ...p.images]; // photos already on the card keep their place, new ones go after
     const ids = new Set();
@@ -81,7 +83,9 @@ async function onAuctionSeen(p, fromTabId, track) {
   }
   if (p.image) a.image = p.image;
   if (p.postUrl) a.postUrl = p.postUrl;
-  if (p.photoSet) a.photoSet = p.photoSet;
+  // Only this post's own album ("pcb.<post id>"), never one from a post shown next to it.
+  if (p.photoSet && (!/^\d+$/.test(a.id) || p.photoSet.endsWith('.' + a.id))) a.photoSet = p.photoSet;
+  if (a.photoSet && /^\d+$/.test(a.id) && !a.photoSet.endsWith('.' + a.id)) a.photoSet = 'pcb.' + a.id;
   a.raw = raw;
   a.lastSeenAt = p.seenAt;
   a.extendedTo = null;
@@ -205,7 +209,10 @@ async function fetchPhotos(id) {
     const log = { ...(now.photoLog || {}), album: { found: found.length, status: res.status, size: html.length, at: new Date().toISOString() } };
     if (!found.length) { await putAuction({ ...now, photoLog: log, photosFetchedAt: new Date().toISOString() }); return; }
     const ids = new Set();
-    const images = [...found, ...(now.images || [])].filter(u => { const k = u.split('?')[0].split('/').pop(); return !ids.has(k) && ids.add(k); }).slice(0, 20);
+    // The album is the post's full photo list, so it replaces what was gathered before (which could
+    // include photos from other posts) unless it found fewer than the post shows.
+    const base = found.length >= Math.min((now.images || []).length, 5) ? [] : (now.images || []);
+    const images = [...found, ...base].filter(u => { const k = u.split('?')[0].split('/').pop(); return !ids.has(k) && ids.add(k); }).slice(0, 20);
     await putAuction({ ...now, images, photoLog: log, photosFetchedAt: new Date().toISOString() });
   } catch (e) {
     const now = await getAuction(id);

@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.2';
+  const SITE_VERSION = '0.19.3';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -147,7 +147,9 @@ Reply`;
     const m = Math.round((Date.now() - new Date(iso)) / 60000);
     return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
   }
-const photos = a => (a.images && a.images.length ? a.images : a.image ? [a.image] : []);
+// Photos you removed with "Not this post" in the photo viewer stay hidden.
+const photoKey = u => String(u).split('?')[0].split('/').pop();
+const photos = a => (a.images && a.images.length ? a.images : a.image ? [a.image] : []).filter(u => !(a.hiddenPhotos || []).includes(photoKey(u)));
 
 function countdownText(iso) {
     if (!iso) return { text: 'No end time', soon: false, ended: false };
@@ -692,7 +694,9 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const fromPhoto = (a.imageText || []).map(t => t.replace(/\s+/g, ' ').trim()).find(t => t.length >= 4 && t.length <= 80);
       parsed.cardName = fromPhoto ? fromPhoto.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : (a.seller ? 'Auction by ' + a.seller : '');
     }
-    for (const f of ['title', 'cardName', 'grade', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe']) {
+    // Graded only when the post itself says so: clear a grade an older reader saved.
+    if (!edited.grade) out.grade = parsed.grade || '';
+    for (const f of ['title', 'cardName', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe']) {
       if (edited[f] || edited[f === 'hasReserve' ? 'reserve' : f]) continue;
       if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
     }
@@ -813,7 +817,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const l = a.photoLog || {}, n = x => x ? (x.error ? 'error' : x.found) : '–';
       return `v${chrome.runtime.getManifest().version} · Photos found · Facebook page: ${n(l.facebook)} · background: ${n(l.background)} · album: ${n(l.album)}${l.album && l.album.status ? ` (${l.album.status}, ${Math.round((l.album.size || 0) / 1024)}KB)` : ''}`;
     };
-    const openLightbox = (pics, i, a) => { lb = { pics, i }; showLb(); $('lbNote').textContent = a ? photoNote(a) : ''; $('lightbox').hidden = false; };
+    const openLightbox = (pics, i, a) => { lb = { pics, i, a }; showLb(); $('lbRemove').hidden = !a || pics.length < 2; $('lbNote').textContent = a ? photoNote(a) : ''; $('lightbox').hidden = false; };
     const step = d => { lb.i = (lb.i + d + lb.pics.length) % lb.pics.length; showLb(); };
     $('lbPrev').addEventListener('click', e => { e.stopPropagation(); step(-1); });
     $('lbNext').addEventListener('click', e => { e.stopPropagation(); step(1); });
@@ -826,6 +830,16 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (e.target.dataset.act !== 'zoom') return;
       const a = auctions.find(x => x.id === e.target.closest('[data-id]').dataset.id);
       if (a) openLightbox(photos(a), 0, a);
+    });
+    $('lbRemove').addEventListener('click', e => {
+      e.stopPropagation();
+      const a = lb.a && auctions.find(x => x.id === lb.a.id);
+      if (!a) return;
+      const hidden = [...(a.hiddenPhotos || []), photoKey(lb.pics[lb.i])];
+      updateField(a, { hiddenPhotos: hidden });
+      lb.pics = lb.pics.filter((_, j) => j !== lb.i); lb.a = { ...a, hiddenPhotos: hidden };
+      if (!lb.pics.length) { $('lightbox').hidden = true; return; }
+      lb.i = Math.min(lb.i, lb.pics.length - 1); showLb(); $('lbRemove').hidden = lb.pics.length < 2;
     });
     $('lightbox').addEventListener('click', e => { if (e.target.id !== 'lbImg') $('lightbox').hidden = true; });
     document.addEventListener('keydown', e => {

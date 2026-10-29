@@ -100,6 +100,8 @@ label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transfo
 .lightbox[hidden] { display: none; }
 .lightbox img { max-width: calc(100% - 100px); max-height: 90vh; object-fit: contain; border-radius: 6px; }
 .lb-nav { background: rgba(255,255,255,.15); color: #fff; border: 0; font-size: 2rem; width: 40px; height: 56px; border-radius: 8px; cursor: pointer; }
+.lb-remove { margin-left: 10px; font: inherit; font-size: .8rem; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.lb-remove[hidden] { display: none; }
 .lb-count { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #fff; font-size: .85rem; }
 .price { display: grid; gap: 2px; }
 .price .k { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -336,7 +338,7 @@ ol.sales li.dropped { text-decoration: line-through; }
   <button type="button" class="lb-nav" id="lbPrev" aria-label="Previous photo">‹</button>
   <img id="lbImg" alt="">
   <button type="button" class="lb-nav" id="lbNext" aria-label="Next photo">›</button>
-  <span class="lb-count"><span id="lbCount"></span><br><small id="lbNote"></small></span>
+  <span class="lb-count"><span id="lbCount"></span> <button type="button" class="lb-remove" id="lbRemove" hidden>✕ Not this post</button><br><small id="lbNote"></small></span>
 </div>
 <script src="bridge.js"></script>
 </body>
