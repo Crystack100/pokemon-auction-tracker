@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.17.2';
+  const SITE_VERSION = '0.18.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -453,6 +453,36 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   }
 
   // Undervalued view: every live tracked auction, ranked by how far the bid sits under the eBay average.
+  // Ended view: tracked auctions that have finished, with the final bid against the eBay AU average.
+  // The last update after the end (the tracker keeps checking for 10 minutes) records the final bid.
+  function renderEnded() {
+    const now = Date.now();
+    const done = auctions.filter(a => isTracked(a) && endOf(a) && new Date(endOf(a)) <= now)
+      .sort((x, y) => new Date(endOf(y)) - new Date(endOf(x)));
+    $('endedNote').textContent = done.length
+      ? `${done.length} finished auction${done.length === 1 ? '' : 's'} you tracked, with what each went for. Newest first. Remove one with ✕ on its card in Tracking (show "All, including ended").`
+      : 'Auctions you track show up here once they finish, with what they went for.';
+    $('endedList').innerHTML = done.length ? done.map(a => {
+      const bid = a.currentBid ?? null;
+      const avg = marketPrice(a);
+      const reserveMissed = a.reserve > 0 && bid != null && bid < a.reserve;
+      const result = bid == null ? '<span class="hint">No bids</span>'
+        : reserveMissed ? `<span class="diff-bad">Reserve ${money(a.reserve)} not met</span>`
+        : !avg ? '<span class="hint">Sold · no eBay price</span>'
+        : `<span class="${bid <= avg ? 'diff-good' : 'diff-bad'}">Sold ${money(Math.abs(avg - bid))} ${bid <= avg ? 'under' : 'over'} (${Math.round(Math.abs(avg - bid) / avg * 100)}%)</span>`;
+      const pic = photos(a)[0];
+      const title = esc(a.cardName || 'Untitled auction') + (a.cardNumber ? ` <small class="hint">${esc(a.cardNumber)}</small>` : '');
+      return `<tr>
+        <td><div class="under-item" data-id="${a.id}"><div class="thumb">${pic ? `<img src="${esc(pic)}" alt="View photos" data-act="zoom" data-i="0" role="button">` : ''}</div>
+          <span>${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">${title}</a>` : title}${a.grade ? ' · ' + esc(a.grade) : ''}</span></div></td>
+        <td class="num">${bid == null ? '—' : money(bid)}<br><small class="hint">${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}</small></td>
+        <td class="num">${avg ? money(avg) : '—'}</td>
+        <td class="num">${result}</td>
+        <td class="num">${esc(localTimeText(endOf(a)))}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="5" class="hint">Nothing has ended yet.</td></tr>`;
+  }
+
   function renderUnder() {
     const now = Date.now();
     const live = auctions.filter(a => isTracked(a) && (!endOf(a) || new Date(endOf(a)) > now));
@@ -514,6 +544,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   function render() {
     renderFound();
     renderUnder();
+    renderEnded();
     const filter = $('filter').value, sort = $('sort').value;
     const now = Date.now();
     let list = auctions.filter(isTracked);
@@ -566,6 +597,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const view = t.dataset.view;
       document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-pressed', String(x === t)));
       $('underSection').hidden = view !== 'under';
+      $('endedSection').hidden = view !== 'ended';
       $('trackingSection').hidden = view !== 'tracking';
     }));
     $('sort').addEventListener('change', render);
@@ -603,6 +635,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const step = d => { lb.i = (lb.i + d + lb.pics.length) % lb.pics.length; showLb(); };
     $('lbPrev').addEventListener('click', e => { e.stopPropagation(); step(-1); });
     $('lbNext').addEventListener('click', e => { e.stopPropagation(); step(1); });
+    $('endedList').addEventListener('click', e => {
+      if (e.target.dataset.act !== 'zoom') return;
+      const a = auctions.find(x => x.id === e.target.closest('[data-id]').dataset.id);
+      if (a) openLightbox(photos(a), 0, a);
+    });
     $('underList').addEventListener('click', e => {
       if (e.target.dataset.act !== 'zoom') return;
       const a = auctions.find(x => x.id === e.target.closest('[data-id]').dataset.id);

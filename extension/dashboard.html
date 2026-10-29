@@ -283,6 +283,7 @@ ol.sales li.dropped { text-decoration: line-through; }
   <nav class="tabs" aria-label="Views">
     <button type="button" class="tab" data-view="tracking" aria-pressed="true">Tracking</button>
     <button type="button" class="tab" data-view="under" aria-pressed="false">Undervalued</button>
+    <button type="button" class="tab" data-view="ended" aria-pressed="false">Ended</button>
   </nav>
 
   <section id="underSection" class="under" hidden aria-labelledby="underTitle">
@@ -293,6 +294,17 @@ ol.sales li.dropped { text-decoration: line-through; }
     <div class="under-wrap"><table class="under-table">
       <thead><tr><th scope="col">Auction</th><th scope="col" class="num">Current bid</th><th scope="col" class="num">eBay AU average</th><th scope="col" class="num">Difference</th><th scope="col" class="num">Ends in</th></tr></thead>
       <tbody id="underList"></tbody>
+    </table></div>
+  </section>
+
+ <section id="endedSection" class="under" hidden aria-labelledby="endedTitle">
+    <div>
+      <h2 id="endedTitle">Ended</h2>
+      <p class="hint" id="endedNote">Auctions you tracked that have finished, with what they went for. Newest first.</p>
+    </div>
+    <div class="under-wrap"><table class="under-table">
+      <thead><tr><th scope="col">Auction</th><th scope="col" class="num">Final bid</th><th scope="col" class="num">eBay AU average</th><th scope="col" class="num">Result</th><th scope="col" class="num">Ended</th></tr></thead>
+      <tbody id="endedList"></tbody>
     </table></div>
   </section>
 
