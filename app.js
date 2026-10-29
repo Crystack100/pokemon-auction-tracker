@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.1';
+  const SITE_VERSION = '0.19.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -252,7 +252,7 @@ function countdownText(iso) {
   const LOT_TITLE = /\b(lot|bundle|bulk|joblot|job lot|set of \d+|\d+\s*(etbs|boxes|tins|packs|cards)|total|combo)\b|\b(and|&|\+)\s+\w+.*\b(etb|box)\b.*\b(etb|box)\b/i;
   const searchNo = n => !n ? '' : /[a-z]/i.test(n) ? n.split('/')[0] : n;
   // Card name plus its number; without a number, the set name narrows it down instead.
-  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
+  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
   // Does an eBay listing title show this card's number? ("RC22/RC25" matches "RC22", "rc 22", "RC22/RC25")
   function sameNumber(title, n) {
     const [first, second] = n.split('/');
@@ -498,7 +498,7 @@ function countdownText(iso) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
     if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">PriceCharting doesn't allow automatic checks. Press "PriceCharting ↗" below once and its price is saved here.</span>`;
-    if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here.</span>`;
+    if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here. If PriceCharting doesn't have it, the eBay AU average is used.</span>`;
     if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
     if (pc.status === 'none') return `<span class="hint">No PriceCharting match for "${esc(pc.query)}". Change the search words in Fix details.</span>`;
     const p = pcPrice(a);

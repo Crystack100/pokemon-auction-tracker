@@ -210,10 +210,16 @@
   const titleCase = t => t.toLowerCase().replace(/(^|[\s(\/-])(\S)/g, (m, a, b) => a + b.toUpperCase())
     .replace(/\b(etb|sar|sir|ir|ar|ex|gx|vmax|vstar|upc|tcg|psa|bgs|cgc|chr|tg|hr|ur|ssp|1st|rc|sv|swsh)\b/gi, w => w.toUpperCase());
 
+  const SEALED = /\b(etb|elite trainer|booster|box|bundle|tin|collection|case|blister|pack|sealed|display)\b/i;
   function parseCard(postLines) {
     const text = postLines.join('\n');
     const f = detailFields(postLines);
-    const g = text.match(/\b(PSA|BGS|CGC|TAG|ACE|SGC|BECKETT)\s*(\d{1,2}(?:\.\d)?)\b/i);
+    let g = text.match(/\b(PSA|BGS|CGC|TAG|ACE|SGC|BECKETT)\s*(\d{1,2}(?:\.\d)?)\b/i);
+    // Only a slab is graded: sealed product (a box, ETB, booster…) that mentions "PSA 10" isn't, unless the post says slab or graded.
+    if (g && !/\b(slab|slabbed|graded)\b/i.test(text)) {
+      const gline = postLines.find(l => l.includes(g[0])) || '';
+      if (SEALED.test(gline) || SEALED.test(f.name || titleFromBlocks(postLines))) g = null;
+    }
     const grade = g ? `${g[1].toUpperCase()} ${g[2]}` : '';
     let source = '';
     if (g) {
