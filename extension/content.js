@@ -38,8 +38,17 @@
       // it) and isn't the commenter's name or a Like/Reply control.
       const own = [...c.querySelectorAll('div[dir="auto"], span[dir="auto"]')].filter(n => n.closest(COMMENT_SEL) === c);
       const body = own.map(textOf).find(t => t && t !== name.trim() && !/^(Like|Reply|Share|Edited|Author|Top contributor|Top fan|Admin|Moderator)$/i.test(t)) || '';
-      return { name: name.trim(), text: body.split('\n')[0].trim() };
+      return { name: name.trim(), text: body.split('\n')[0].trim(), at: commentTime(label) };
     }).filter(c => c.name && c.text);
+  }
+  // When a comment was posted, from its label ("Comment by Sid 5 minutes ago", "... 2h", "... a day ago").
+  function commentTime(label) {
+    if (/\bjust now\b/i.test(label)) return Date.now();
+    const m = label.match(/\b(\d+|an?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|wks?|w)\b(?:\s+ago)?\s*$/i);
+    if (!m) return null;
+    const n = /^an?$/i.test(m[1]) ? 1 : +m[1];
+    const unit = m[2].toLowerCase()[0] === 'm' && !/^mo/.test(m[2]) ? 60e3 : { s: 1e3, h: 3600e3, d: 86400e3, w: 604800e3 }[m[2].toLowerCase()[0]];
+    return unit ? Date.now() - n * unit : null;
   }
 
   // Backup for when Facebook's comment labels aren't there: any short text block outside the

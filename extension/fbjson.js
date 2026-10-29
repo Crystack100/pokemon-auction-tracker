@@ -29,7 +29,7 @@
       if (o !== node && typeof o.post_id === 'string' && o.post_id !== node.post_id) return false; // a different (shared) post
       if (o.body && typeof o.body.text === 'string' && o.author && typeof o.author.name === 'string') {
         const id = o.author.name + '|' + o.body.text;
-        if (!seenComments.has(id)) { seenComments.add(id); s.comments.push({ name: o.author.name, text: o.body.text.split('\n')[0].trim(), created: o.created_time || 0 }); }
+        if (!seenComments.has(id)) { seenComments.add(id); s.comments.push({ name: o.author.name, text: o.body.text.split('\n')[0].trim(), created: o.created_time || 0, at: o.created_time ? o.created_time * 1000 : null }); }
         return; // look inside for replies too
       }
       if (o.message && typeof o.message.text === 'string' && o.message.text.length > s.text.length) s.text = o.message.text;

@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.18.0';
+  const SITE_VERSION = '0.18.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -174,7 +174,13 @@ function countdownText(iso) {
     const auto = a.ebayAuto || {};
     const all = (auto.sales || []).filter(s => s.currency !== 'USD' && s.price > 0).map(s => ({ ...s, t: Date.parse(s.soldDate) || null }));
     // Only sales of this exact card, when its number is known (eBay also lists near matches).
-    const sales = a.cardNumber ? all.filter(s => sameNumber(s.title || '', a.cardNumber)) : all;
+    let sales = a.cardNumber ? all.filter(s => sameNumber(s.title || '', a.cardNumber)) : all;
+    // Raw card: leave out graded copies. Graded card: keep only the same grade (e.g. PSA 10).
+    const gm = (a.grade || '').match(/^(\w+)\s*([\d.]+)$/);
+    const before = sales.length;
+    if (gm) sales = sales.filter(s => new RegExp(`\\b${gm[1]}\\s*${gm[2].replace('.', '\\.')}(?![\\d.])`, 'i').test(s.title || ''));
+    else if (isSingleCard(a)) sales = sales.filter(s => !GRADED_TITLE.test(s.title || ''));
+    const otherGrade = before - sales.length;
     if (a.cardNumber && all.length && !sales.length) return null;
     if (!sales.length) return auto.average && auto.currency !== 'USD' ? { average: auto.average, count: auto.count, legacy: true } : null;
     const ref = new Date(a.addedAt || auto.checkedAt || Date.now()).getTime();
@@ -187,7 +193,7 @@ function countdownText(iso) {
     const kept = byPrice.length >= 5 ? byPrice.slice(1, -1) : byPrice;
     const average = Math.round(kept.reduce((t, x) => t + x.price, 0) / kept.length);
     const times = used.map(x => x.t).filter(Boolean);
-    return { average, used, kept, dropped, days, otherCards: all.length - sales.length, older: sales.length - pool.length, skipped: pool.length - used.length,
+    return { average, used, kept, dropped, days, otherCards: all.length - sales.length - otherGrade, otherGrade, older: sales.length - pool.length, skipped: pool.length - used.length,
       from: times.length ? Math.min(...times) : null, to: times.length ? Math.max(...times) : null, count: used.length };
   }
   const shortDate = t => new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
@@ -200,6 +206,7 @@ function countdownText(iso) {
     const span = m.from ? `${shortDate(m.from)} – ${shortDate(m.to)}` : 'dates unknown';
     const how = [
       m.days ? `Used the ${m.count} most recent eBay AU sales from the ${m.days} days before this auction was posted (${span}).` : `Fewer than 3 sales in the last year, so used all ${m.count} found (${span}).`,
+      m.otherGrade ? `Left out ${m.otherGrade} ${a.grade ? `sale${m.otherGrade === 1 ? '' : 's'} that weren't ${esc(a.grade)}` : `graded sale${m.otherGrade === 1 ? '' : 's'} (this card is ungraded)`}.` : '',
       m.otherCards ? `Left out ${m.otherCards} sale${m.otherCards === 1 ? '' : 's'} of other cards (not number ${esc(a.cardNumber)}).` : '',
       m.older ? `Left out ${m.older} older sale${m.older === 1 ? '' : 's'}.` : '',
       m.skipped ? `Left out ${m.skipped} more from that period beyond the 10 most recent.` : '',
@@ -229,6 +236,10 @@ function countdownText(iso) {
   }
 
   // The number as sellers write it in eBay titles: "RC22" for lettered numbers, "113/114" otherwise.
+  // A single card (graded or with a card number), rather than sealed product like an ETB or booster box.
+  const isSingleCard = a => !!(a.grade || a.cardNumber) && !/\b(etb|elite trainer|booster|box|bundle|tin|collection box|case|pack|sealed)\b/i.test(a.cardName || '');
+  // eBay titles of graded copies: used to keep raw and graded sales apart.
+  const GRADED_TITLE = /\b(PSA|BGS|CGC|TAG|ACE|SGC|Beckett|graded|slab(bed)?)\b/i;
   const searchNo = n => !n ? '' : /[a-z]/i.test(n) ? n.split('/')[0] : n;
   // Card name plus its number; without a number, the set name narrows it down instead.
   function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
@@ -246,7 +257,8 @@ function countdownText(iso) {
     const q = encodeURIComponent(ebayQuery(a));
     return [
       // Opening eBay AU sold listings also saves their average to the card (read by the extension on that page).
-      ['eBay AU sold', `https://www.ebay.com.au/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${inExtension ? '#pat=' + a.id : ''}`],
+      // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
+      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       ['PriceCharting', `https://www.pricecharting.com/search-products?type=prices&q=${q}`],
     ];
@@ -370,7 +382,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.example ? '<span class="example-tag">Example</span>' : ''}
           <span class="k">${a.currentBid == null && a.startBid != null ? 'Starting bid' : cd.ended ? 'Final bid' : 'Current bid'}</span>
           <span class="v">${money(a.currentBid ?? a.startBid ?? 0)}</span>
-          <span class="who">${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
+          <span class="who">${a.lateComments ? `${a.lateComments} comment${a.lateComments === 1 ? '' : 's'} after the end not counted · ` : ''}${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
           <span class="pill ${v.cls}">${v.text}</span>
         </div>
       </div>
@@ -532,8 +544,22 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (!edited.qty) out.qty = lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
-    if (Array.isArray(a.allComments) && !a.manualBid) {
-      const bids = a.allComments.map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
+    // End time and anti-snipe: a bid in the last 5 minutes pushes the end out 5 minutes from that bid.
+    // Only comment times from Facebook count (not when the tracker happened to read them), and
+    // anything posted after the end is left out of the bids.
+    const endsMs = out.endsAt && !a.extendedByHand ? new Date(out.endsAt).getTime() : null;
+    let endMs = endsMs;
+    out.extendedTo = null;
+    const comments = Array.isArray(a.allComments) ? a.allComments : null;
+    if (endMs && comments) {
+      const timedBids = comments.filter(c => c.at && P.bidAmount(c.text) != null).sort((x, y) => x.at - y.at);
+      if (out.antiSnipe) for (const c of timedBids) if (c.at > endMs - 5 * 60e3 && c.at <= endMs) endMs = c.at + 5 * 60e3;
+      if (endMs > endsMs) out.extendedTo = new Date(endMs).toISOString();
+    }
+    const inTime = c => !(endMs && c.at && c.at > endMs);
+    out.lateComments = comments && endMs ? comments.filter(c => !inTime(c)).length : 0;
+    if (comments && !a.manualBid) {
+      const bids = comments.filter(inTime).map(c => ({ name: c.name, amount: P.bidAmount(c.text) })).filter(x => x.amount != null);
       const top = bids.reduce((m, x) => (!m || x.amount > m.amount ? x : m), null);
       if (top) Object.assign(out, { currentBid: top.amount, topBidder: top.name });
       out.bidCount = bids.length;

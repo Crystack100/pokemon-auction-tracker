@@ -64,7 +64,7 @@ async function onAuctionSeen(p, fromTabId, track) {
   }
   if (parsed.endsAt && !edited.endsAt) { a.endsAt = parsed.endsAt; a.zone = parsed.zone; }
   // Anti-snipe: a late bid can push the end out, so keep the latest end we know of.
-  if (a.antiSnipe && a.endsAt && a.lastBidAt) {
+  if (false) { // anti-snipe extensions are now worked out on the website from comment times
     const endMs = new Date(a.endsAt).getTime();
     const ext = new Date(a.lastBidAt).getTime() + 5 * 60e3;
     if (new Date(a.lastBidAt).getTime() > endMs - 5 * 60e3 && ext > endMs) a.extendedTo = new Date(ext).toISOString();
@@ -84,6 +84,7 @@ async function onAuctionSeen(p, fromTabId, track) {
   if (p.photoSet) a.photoSet = p.photoSet;
   a.raw = raw;
   a.lastSeenAt = p.seenAt;
+  a.extendedTo = null;
 
   // Bids: the highest dollar comment we've ever seen wins (comments can scroll out of view).
   if (parsed.currentBid != null && (a.currentBid == null || parsed.currentBid > a.currentBid || a.manualBid)) {
@@ -96,8 +97,15 @@ async function onAuctionSeen(p, fromTabId, track) {
   a.commentsRead = (p.comments || []).length;
   // Every comment ever read, and the words Facebook read off the photos, so the tracker website can
   // re-read the post with its newest rules.
-  const have = new Set((a.allComments || []).map(c => c.name + '|' + c.text));
-  a.allComments = [...(a.allComments || []), ...(p.comments || []).filter(c => !have.has(c.name + '|' + c.text))].slice(-500);
+  // Each comment keeps when it was posted (from Facebook) and when it was first read, so the
+  // tracker website can leave out comments made after the auction ended.
+  const known = new Map((a.allComments || []).map(c => [c.name + '|' + c.text, c]));
+  for (const c of p.comments || []) {
+    const k = c.name + '|' + c.text, old = known.get(k);
+    if (!old) known.set(k, { name: c.name, text: c.text, at: c.at || null, seen: p.seenAt });
+    else if (!old.at && c.at) known.set(k, { ...old, at: c.at });
+  }
+  a.allComments = [...known.values()].slice(-500);
   if (p.imageText && p.imageText.length) a.imageText = p.imageText;
 
   if (!a.photoSet && /^\d+$/.test(a.id)) a.photoSet = 'pcb.' + a.id;
