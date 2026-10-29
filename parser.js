@@ -235,6 +235,21 @@
     return { grade, cardName: name, setName, detailNumber: f.number ? cardNumber(f.number) || f.number.toUpperCase() : '' };
   }
 
+  // Anti-snipe rule: "+5 mins within the last 5 mins", "Any bid within the final 2 minutes extends
+  // the auction by an additional 3 minutes". Gives the window and how much each late bid adds (default 5 and 5).
+  function antiSnipeRule(text) {
+    const i = text.search(/anti[\s-]*snipe/i);
+    if (i < 0) return {};
+    const near = text.slice(text.lastIndexOf('\n', i) + 1, i + 260).split('\n').slice(0, 3).join(' ');
+    const M = '(\\d{1,2})\\s*(?:m\\b|mins?\\b|minutes?\\b)';
+    const add = near.match(new RegExp(`(?:\\+|add(?:s|ing)?(?: on)?(?: an?(?:dditional|nother)?)?|extend(?:s|ed)?(?: the auction)?(?: by)?(?: an? additional| another)?)\\s*${M}`, 'i'));
+    const win = near.match(new RegExp(`(?:last|final|within(?: the)?(?: last| final)?)\\s*${M}`, 'i'));
+    const any = near.match(new RegExp(M, 'i'));
+    const addMins = add ? +add[1] : win ? +win[1] : any ? +any[1] : 5;
+    const windowMins = win ? +win[1] : addMins;
+    return { antiSnipeMins: addMins > 0 && addMins <= 60 ? addMins : 5, antiSnipeWindow: windowMins > 0 && windowMins <= 60 ? windowMins : 5 };
+  }
+
   // Postage: the cheapest price listed in the postage section, skipping insurance amounts.
   function parsePostage(postLines) {
     const start = postLines.findIndex(l => /postage|shipping|delivery/i.test(l));
@@ -288,6 +303,7 @@
       buyNow: parseMoney(postText, /(?:buy\s*now|\bbin)\s*[:\-@]?\s*\$\s*(\d[\d,]*)/i),
       hasReserve, reserve,
       antiSnipe: /anti[\s-]*snipe/i.test(postText),
+      ...antiSnipeRule(postText),
       ...parseEnd(postLines, now),
       currentBid: top ? top.amount : null,
       topBidder: top ? top.name : null,

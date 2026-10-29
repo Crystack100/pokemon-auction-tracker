@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.3';
+  const SITE_VERSION = '0.19.4';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -545,11 +545,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       <div class="body">
         <dl>
           <dt>Reserve</dt><dd${reserveMet == null ? '' : ` class="${reserveMet ? 'met' : 'unmet'}" title="${reserveMet ? 'Reserve met' : 'Reserve not met yet'}"`}>${reserve}</dd>
-          ${a.antiSnipe ? '<dt>Anti-snipe</dt><dd>Extends in last 5 min</dd>' : ''}
+          ${a.antiSnipe ? `<dt>Anti-snipe</dt><dd>+${a.antiSnipeMins || 5} min for bids in the last ${a.antiSnipeWindow || a.antiSnipeMins || 5} min</dd>` : ''}
         </dl>
         <div class="ends">
           <span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span>
-          <span class="when">${endOf(a) ? (a.extendedTo ? 'Extended by anti-snipe<br>' : '') + esc(localTimeText(endOf(a))) : ''}</span>
+          <span class="when">${endOf(a) ? (a.extendedTo ? `Extended by anti-snipe (was ${esc(localTimeText(a.endsAt))})<br>` : '') + esc(localTimeText(endOf(a))) : ''}</span>
         </div>
         <div class="market">
           <label>PriceCharting search<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
@@ -696,7 +696,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     }
     // Graded only when the post itself says so: clear a grade an older reader saved.
     if (!edited.grade) out.grade = parsed.grade || '';
-    for (const f of ['title', 'cardName', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe']) {
+    for (const f of ['title', 'cardName', 'postage', 'startBid', 'buyNow', 'hasReserve', 'reserve', 'antiSnipe', 'antiSnipeMins', 'antiSnipeWindow']) {
       if (edited[f] || edited[f === 'hasReserve' ? 'reserve' : f]) continue;
       if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
     }
@@ -704,7 +704,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (!edited.qty) out.qty = lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
-    // End time and anti-snipe: a bid in the last 5 minutes pushes the end out 5 minutes from that bid.
+    // End time and anti-snipe (rule read from the post, e.g. "+5 mins within the last 5 mins").
     // Only comment times from Facebook count (not when the tracker happened to read them), and
     // anything posted after the end is left out of the bids.
     const endsMs = out.endsAt && !a.extendedByHand ? new Date(out.endsAt).getTime() : null;
@@ -713,7 +713,17 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const comments = Array.isArray(a.allComments) ? a.allComments : null;
     if (endMs && comments) {
       const timedBids = comments.filter(c => c.at && P.bidAmount(c.text) != null).sort((x, y) => x.at - y.at);
-      if (out.antiSnipe) for (const c of timedBids) if (c.at > endMs - 5 * 60e3 && c.at <= endMs) endMs = c.at + 5 * 60e3;
+      // Anti-snipe: each bid (higher than the one before) placed within the last few minutes before the
+      // current end adds the stated minutes to the end, so later bids are checked against the new end.
+      const add = (out.antiSnipeMins || 5) * 60e3, win = (out.antiSnipeWindow || out.antiSnipeMins || 5) * 60e3;
+      let high = -1;
+      if (out.antiSnipe) for (const c of timedBids) {
+        const amt = P.bidAmount(c.text);
+        if (c.at > endMs) break;
+        if (amt <= high) continue;
+        high = amt;
+        if (c.at >= endMs - win) endMs += add;
+      }
       if (endMs > endsMs) out.extendedTo = new Date(endMs).toISOString();
     }
     const inTime = c => !(endMs && c.at && c.at > endMs);
