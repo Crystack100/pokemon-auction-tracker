@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.18.1';
+  const SITE_VERSION = '0.19.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -162,8 +162,12 @@ function countdownText(iso) {
 
   // Price you'd actually pay (bid + postage) against the last eBay sale.
   // A price typed in by hand wins over the automatic eBay lookup.
-  // Market value: a value you typed in Fix details wins; otherwise the eBay AU average times the quantity.
-  const marketPrice = a => { if (a.ebaySold != null) return a.ebaySold; const m = ebayMarket(a); return m ? m.average * qtyOf(a) : null; };
+  // Market value: a value you typed in Fix details wins; then PriceCharting (in AUD); then the eBay AU average. Times the quantity.
+  const marketPrice = a => {
+    if (a.ebaySold != null) return a.ebaySold;
+    const pc = pcPrice(a); if (pc) return pc.aud * qtyOf(a);
+    const m = ebayMarket(a); return m ? m.average * qtyOf(a) : null;
+  };
   const qtyOf = a => (a.qty > 1 ? a.qty : 1);
 
   // eBay AU average, worked out from the sales the extension saved (with their sold dates):
@@ -181,6 +185,10 @@ function countdownText(iso) {
     if (gm) sales = sales.filter(s => new RegExp(`\\b${gm[1]}\\s*${gm[2].replace('.', '\\.')}(?![\\d.])`, 'i').test(s.title || ''));
     else if (isSingleCard(a)) sales = sales.filter(s => !GRADED_TITLE.test(s.title || ''));
     const otherGrade = before - sales.length;
+    // A single item: leave out lots and bundles ("3 ETBs total", "x2", "bundle"), which inflate the average.
+    const beforeLots = sales.length;
+    if (qtyOf(a) === 1) sales = sales.filter(s => !LOT_TITLE.test(s.title || '') && !lotQty(s.title || ''));
+    const lots = beforeLots - sales.length;
     if (a.cardNumber && all.length && !sales.length) return null;
     if (!sales.length) return auto.average && auto.currency !== 'USD' ? { average: auto.average, count: auto.count, legacy: true } : null;
     const ref = new Date(a.addedAt || auto.checkedAt || Date.now()).getTime();
@@ -193,7 +201,7 @@ function countdownText(iso) {
     const kept = byPrice.length >= 5 ? byPrice.slice(1, -1) : byPrice;
     const average = Math.round(kept.reduce((t, x) => t + x.price, 0) / kept.length);
     const times = used.map(x => x.t).filter(Boolean);
-    return { average, used, kept, dropped, days, otherCards: all.length - sales.length - otherGrade, otherGrade, older: sales.length - pool.length, skipped: pool.length - used.length,
+    return { average, used, kept, dropped, days, otherCards: all.length - sales.length - otherGrade - lots, otherGrade, lots, older: sales.length - pool.length, skipped: pool.length - used.length,
       from: times.length ? Math.min(...times) : null, to: times.length ? Math.max(...times) : null, count: used.length };
   }
   const shortDate = t => new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
@@ -207,6 +215,7 @@ function countdownText(iso) {
     const how = [
       m.days ? `Used the ${m.count} most recent eBay AU sales from the ${m.days} days before this auction was posted (${span}).` : `Fewer than 3 sales in the last year, so used all ${m.count} found (${span}).`,
       m.otherGrade ? `Left out ${m.otherGrade} ${a.grade ? `sale${m.otherGrade === 1 ? '' : 's'} that weren't ${esc(a.grade)}` : `graded sale${m.otherGrade === 1 ? '' : 's'} (this card is ungraded)`}.` : '',
+      m.lots ? `Left out ${m.lots} lot${m.lots === 1 ? '' : 's'} or bundle${m.lots === 1 ? '' : 's'} with more than one item.` : '',
       m.otherCards ? `Left out ${m.otherCards} sale${m.otherCards === 1 ? '' : 's'} of other cards (not number ${esc(a.cardNumber)}).` : '',
       m.older ? `Left out ${m.older} older sale${m.older === 1 ? '' : 's'}.` : '',
       m.skipped ? `Left out ${m.skipped} more from that period beyond the 10 most recent.` : '',
@@ -225,7 +234,7 @@ function countdownText(iso) {
     const bid = a.currentBid ?? a.startBid ?? (market ? 0 : null);
     if (bid == null) return { cls: 'none', text: 'No bids yet', ratio: null };
     const st = a.ebayAuto && a.ebayAuto.status;
-    if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No eBay AU price yet' : 'Add eBay last sold to compare', ratio: null };
+    if (!market) return { cls: 'none', text: st === 'checking' ? 'Checking eBay…' : inExtension ? 'No market price yet' : 'Add a market value to compare', ratio: null };
     const total = bid;
     const ratio = total / market;
     const pct = Math.round(Math.abs(1 - ratio) * 100);
@@ -240,6 +249,7 @@ function countdownText(iso) {
   const isSingleCard = a => !!(a.grade || a.cardNumber) && !/\b(etb|elite trainer|booster|box|bundle|tin|collection box|case|pack|sealed)\b/i.test(a.cardName || '');
   // eBay titles of graded copies: used to keep raw and graded sales apart.
   const GRADED_TITLE = /\b(PSA|BGS|CGC|TAG|ACE|SGC|Beckett|graded|slab(bed)?)\b/i;
+  const LOT_TITLE = /\b(lot|bundle|bulk|joblot|job lot|set of \d+|\d+\s*(etbs|boxes|tins|packs|cards)|total|combo)\b|\b(and|&|\+)\s+\w+.*\b(etb|box)\b.*\b(etb|box)\b/i;
   const searchNo = n => !n ? '' : /[a-z]/i.test(n) ? n.split('/')[0] : n;
   // Card name plus its number; without a number, the set name narrows it down instead.
   function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
@@ -260,7 +270,7 @@ function countdownText(iso) {
       // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
       ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
-      ['PriceCharting', `https://www.pricecharting.com/search-products?type=prices&q=${q}`],
+      ['PriceCharting', a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)],
     ];
   }
 
@@ -354,6 +364,131 @@ function countdownText(iso) {
   }
 
   /* ---------- the list ---------- */
+  /* ---------- PriceCharting ----------
+     The extension reads PriceCharting's page for this item (the site blocks reading it from here
+     directly), and this page picks the matching product and the price for its grade. Prices are in
+     US dollars and converted to AUD. Results are saved on the auction and refreshed every 12 hours. */
+  const PC_LABELS = { used_price: 'Ungraded', complete_price: 'Grade 7', new_price: 'Grade 8', graded_price: 'Grade 9', box_only_price: 'Grade 9.5', manual_only_price: 'PSA 10' };
+  let audPerUsd = null, audRateNote = '';
+  async function loadRate() {
+    for (const [url, get] of [['https://api.frankfurter.dev/v1/latest?base=USD&symbols=AUD', j => j.rates.AUD], ['https://open.er-api.com/v6/latest/USD', j => j.rates.AUD]]) {
+      try { const r = await get(await (await fetch(url)).json()); if (r > 0.5 && r < 5) { audPerUsd = r; audRateNote = `US$1 = A$${r.toFixed(2)} today`; return; } } catch {}
+    }
+    audPerUsd = 1.52; audRateNote = 'US$1 ≈ A$1.52 (rate service unavailable)';
+  }
+  function pcQuery(a) {
+    if (a.pcQuery) return a.pcQuery;
+    const name = (a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '').replace(/\b(PSA|BGS|CGC|TAG|ACE|SGC)\s*[\d.]+\b/gi, '').replace(/\bETB\b/i, 'Elite Trainer Box');
+    // PriceCharting writes card numbers as "#RC22" or "#113", so only the first part is searched.
+    return `${name} ${a.cardNumber ? a.cardNumber.split('/')[0] : ''}`.replace(/\s+/g, ' ').trim();
+  }
+  const pcSearchUrl = a => `https://www.pricecharting.com/search-products?type=prices&q=${encodeURIComponent(pcQuery(a))}`;
+  const usd = t => { const n = parseFloat(String(t || '').replace(/[^\d.]/g, '')); return n > 0 ? n : null; };
+  // One product page: its name, set, and the price under each column (Ungraded, Grade 9, PSA 10…).
+  function pcReadProduct(doc, url) {
+    const table = doc.querySelector('#price_data');
+    if (!table) return null;
+    const heads = [...table.querySelectorAll('thead th, tr:first-child th')].map(th => th.textContent.replace(/\s+/g, ' ').trim());
+    const prices = {};
+    const cells = [...table.querySelectorAll('td[id$="_price"]')];
+    cells.forEach((td, i) => {
+      const label = (heads.length === cells.length ? heads[i] : '') || PC_LABELS[td.id] || td.id;
+      const v = usd((td.querySelector('.price, .js-price') || td).textContent);
+      if (v && !(label in prices)) prices[label] = v;
+    });
+    const h1 = doc.querySelector('h1#product_name, #product_name');
+    const set = h1 && h1.querySelector('a') ? h1.querySelector('a').textContent.trim() : '';
+    const name = h1 ? h1.childNodes[0].textContent.replace(/\s+/g, ' ').trim() : '';
+    return { name, set, url, prices };
+  }
+  // Search results: pick the row that matches the card number, then the most words of the title and set.
+  function pcPickRow(doc, a) {
+    const rows = [...doc.querySelectorAll('#games_table tbody tr, table.hoverable-rows tbody tr')].map(tr => {
+      const link = tr.querySelector('td.title a, a[href*="/game/"]');
+      return link && { href: new URL(link.getAttribute('href'), 'https://www.pricecharting.com').href, title: link.textContent.trim(), set: (tr.querySelector('td.console') || {}).textContent || '' };
+    }).filter(Boolean).filter(r => /pokemon/i.test(r.href + r.set));
+    const words = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[a-z0-9]+/g) || [];
+    const want = new Set(words(pcQuery(a)).concat(words(a.setName)));
+    let best = null;
+    for (const r of rows) {
+      if (a.cardNumber && !sameNumber(r.title, a.cardNumber)) continue;
+      const have = new Set(words(r.title + ' ' + r.set));
+      let score = 0; want.forEach(w => { if (have.has(w)) score++; });
+      if (!isSingleCard(a) && /\b(etb|elite trainer)\b/i.test(a.cardName || '') !== /elite trainer/i.test(r.title)) score -= 3;
+      if (/japanese|chinese|korean/i.test(r.set) && !/japanese|chinese|korean/i.test(a.cardName + ' ' + a.setName)) score -= 2;
+      if (!best || score > best.score) best = { ...r, score };
+    }
+    return best;
+  }
+  function pcGradeLabel(a, prices) {
+    const labels = Object.keys(prices);
+    const find = re => labels.find(l => re.test(l));
+    const gm = (a.grade || '').match(/^(\w+)\s*([\d.]+)$/);
+    if (gm) {
+      const [, co, n] = gm;
+      return find(new RegExp(`^${co}\\s*${n.replace('.', '\\.')}$`, 'i')) || (n === '10' ? null : find(new RegExp(`^grade\\s*${n.replace('.', '\\.')}$`, 'i'))) || null;
+    }
+    if (!isSingleCard(a)) return find(/sealed|^new/i) || find(/ungraded|loose/i) || labels[0] || null;
+    return find(/ungraded|loose/i) || null;
+  }
+  // The PriceCharting price for this auction (one item), or null.
+  function pcPrice(a) {
+    const pc = a.pc;
+    if (!pc || pc.status !== 'ok' || !pc.prices) return null;
+    const label = pcGradeLabel(a, pc.prices);
+    if (!label || !audPerUsd && !pc.rate) return null;
+    const rate = audPerUsd || pc.rate;
+    return { label, usd: pc.prices[label], aud: Math.round(pc.prices[label] * rate), rate };
+  }
+  const fetchPage = url => window.patBridge && window.patBridge.fetchPage ? window.patBridge.fetchPage(url) : chrome.runtime.sendMessage({ type: 'pc-fetch', url });
+  const pcBusy = new Set();
+  async function pcLookup(a) {
+    if (!inExtension || pcBusy.has(a.id)) return;
+    pcBusy.add(a.id);
+    const save = async pc => { const r = await chrome.storage.local.get('auction:' + a.id); const cur = r['auction:' + a.id]; if (cur) await chrome.storage.local.set({ ['auction:' + a.id]: { ...cur, pc } }); };
+    const query = pcQuery(a);
+    try {
+      const get = async url => { const r = await fetchPage(url); if (!r || typeof r !== 'object') throw new Error('old-extension'); if (r.error || r.status >= 400) throw new Error(r.error || 'PriceCharting answered ' + r.status); return { doc: new DOMParser().parseFromString(r.text, 'text/html'), url: r.url || url }; };
+      let { doc, url } = await get(pcSearchUrl(a));
+      let product = pcReadProduct(doc, url);
+      if (!product) {
+        const row = pcPickRow(doc, a);
+        if (!row) { await save({ status: 'none', query, checkedAt: new Date().toISOString() }); return; }
+        ({ doc, url } = await get(row.href));
+        product = pcReadProduct(doc, url);
+      }
+      if (!product || !Object.keys(product.prices).length) { await save({ status: 'none', query, url, checkedAt: new Date().toISOString() }); return; }
+      await save({ status: 'ok', query, ...product, rate: audPerUsd, checkedAt: new Date().toISOString() });
+    } catch (e) {
+      if (e.message === 'old-extension') { a.pcOld = true; return; }
+      await save({ status: 'error', query, error: e.message, checkedAt: new Date().toISOString() });
+    } finally { pcBusy.delete(a.id); }
+  }
+  // Look up tracked auctions that have no PriceCharting price yet, or one older than 12 hours, one at a time.
+  let pcRunning = false;
+  async function pcQueue() {
+    if (!inExtension || pcRunning) return;
+    const extVer = (chrome.runtime.getManifest().version || '0').split('.').map(Number);
+    if (extVer[0] === 0 && extVer[1] < 16) return; // needs extension 0.16.0
+    pcRunning = true;
+    try {
+      if (!audPerUsd) await loadRate();
+      const due = auctions.filter(a => isTracked(a) && !a.example && (!a.pc || a.pc.query !== pcQuery(a) || Date.now() - Date.parse(a.pc.checkedAt) > 12 * 3600e3));
+      for (const a of due) { await pcLookup(a); await new Promise(r => setTimeout(r, 1500)); }
+    } finally { pcRunning = false; }
+  }
+  function pcExplain(a) {
+    const pc = a.pc;
+    if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
+    if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
+    if (pc.status === 'none') return `<span class="hint">No PriceCharting match for "${esc(pc.query)}". Change the search words in Fix details.</span>`;
+    const p = pcPrice(a);
+    const q = qtyOf(a);
+    const all = Object.entries(pc.prices).map(([l, v]) => `${esc(l)} US${money(v)}`).join(' · ');
+    if (!p) return `<span class="hint">PriceCharting has no ${esc(a.grade || 'ungraded')} price for <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}</a>. ${all}</span>`;
+    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
+      <details class="how"><summary>How this was worked out</summary><p class="hint">Matched <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}${pc.set ? ' (' + esc(pc.set) + ')' : ''}</a> on PriceCharting, searched as "${esc(pc.query)}". Its ${esc(p.label)} price is US${money(p.usd)}, which is ${money(p.aud)} at ${esc(audRateNote || `US$1 = A$${p.rate.toFixed(2)}`)}.${q > 1 ? ` This lot has ${q} items, so ${money(p.aud)} × ${q} = ${money(p.aud * q)}.` : ''} PriceCharting's price is its average of recent sold listings for that exact product and grade. Checked ${esc(ago(pc.checkedAt))}.</p><p class="hint">All its prices: ${all}</p></details>`;
+  }
   function renderCard(a) {
     const cd = countdownText(endOf(a));
     const v = verdict(a);
@@ -396,12 +531,14 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           <span class="when">${endOf(a) ? (a.extendedTo ? 'Extended by anti-snipe<br>' : '') + esc(localTimeText(endOf(a))) : ''}</span>
         </div>
         <div class="market">
+          <label>PriceCharting search<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
           <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
-          ${v.ratio != null ? `<div class="bar" title="Line marks the eBay AU price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
+          ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
-          ${ebayMarket(a) ? ebayExplain(a) : autoText ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
+          ${pcExplain(a)}
+          ${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         ${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" class="update-row" data-act="update-now">↻ Update bids</button>' : ''}
@@ -418,7 +555,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
             <label>Reserve $<input data-field="reserve" inputmode="decimal" value="${a.reserve ?? ''}" placeholder="${a.hasReserve === false ? 'No reserve' : ''}"></label>
             <label>Ends<input data-field="ends" type="datetime-local" value="${isoToWall(a.endsAt, a.zone || 'QLD')}"></label>
             <label>Quantity in lot<input data-field="qty" inputmode="numeric" value="${a.qty > 1 ? a.qty : ''}" placeholder="1"></label>
-            <label>Market value $<input data-field="marketValue" inputmode="decimal" value="${a.ebaySold ?? ''}" placeholder="eBay AU average"></label>
+            <label>Market value $<input data-field="marketValue" inputmode="decimal" value="${a.ebaySold ?? ''}" placeholder="PriceCharting / eBay"></label>
             <label>Time zone<select data-field="zone">${ZONE_CHOICES.map(([z, t]) => `<option value="${z}"${(a.zone || 'QLD') === z ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
           </div>
           <div class="foot" style="margin-top:8px">
@@ -480,7 +617,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const reserveMissed = a.reserve > 0 && bid != null && bid < a.reserve;
       const result = bid == null ? '<span class="hint">No bids</span>'
         : reserveMissed ? `<span class="diff-bad">Reserve ${money(a.reserve)} not met</span>`
-        : !avg ? '<span class="hint">Sold · no eBay price</span>'
+        : !avg ? '<span class="hint">Sold · no market price</span>'
         : `<span class="${bid <= avg ? 'diff-good' : 'diff-bad'}">Sold ${money(Math.abs(avg - bid))} ${bid <= avg ? 'under' : 'over'} (${Math.round(Math.abs(avg - bid) / avg * 100)}%)</span>`;
       const pic = photos(a)[0];
       const title = esc(a.cardName || 'Untitled auction') + (a.cardNumber ? ` <small class="hint">${esc(a.cardNumber)}</small>` : '');
@@ -724,11 +861,12 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     $('hideAll').addEventListener('click', () => auctions.filter(isFound).forEach(a => updateField(a, { dismissed: true })));
     $('grid').addEventListener('change', e => {
       const field = e.target.dataset.field;
-      if (field !== 'ebaySold' && field !== 'ebayQuery') return;
+      if (field !== 'ebaySold' && field !== 'ebayQuery' && field !== 'pcQuery') return;
       const a = auctions.find(x => x.id === e.target.closest('.slab').dataset.id);
       if (!a) return;
       updateField(a, { [field]: field === 'ebaySold' ? numOrNull(e.target.value) : e.target.value.trim() });
       if (field === 'ebayQuery' && inExtension) setTimeout(() => chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true }), 300);
+      if (field === 'pcQuery') setTimeout(pcQueue, 300);
     });
   }
 
@@ -808,6 +946,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       }
       first = false;
       render();
+      pcQueue();
     }, err => { $('storeStatus').textContent = 'Could not load saved auctions: ' + (err.message || err.code); });
     setInterval(tick, 1000);
   }

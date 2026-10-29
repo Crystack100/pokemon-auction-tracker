@@ -34,6 +34,7 @@
           local: { get: k => call('get', k === undefined ? null : k), set: o => call('set', o), remove: k => call('remove', k) },
           onChanged: { addListener: f => changeFns.push(f) },
         },
+        fetchPage: url => call('fetch', url),
         runtime: { id: 'pat-bridge', sendMessage: m => call('send', m).catch(() => {}), getManifest: () => ({ version: info.version }) },
       };
     } else {

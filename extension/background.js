@@ -243,7 +243,17 @@ async function silentCheck(url, groupId, targetId) {
 }
 
 /* ---------- wiring ---------- */
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // The tracker page reads PriceCharting prices through here (that site doesn't let other pages read it).
+  // Only PriceCharting pages, read as a normal visit without your cookies.
+  if (msg.type === 'pc-fetch') {
+    let u = null; try { u = new URL(msg.url); } catch {}
+    if (!u || u.protocol !== 'https:' || u.hostname !== 'www.pricecharting.com') { sendResponse({ error: 'not allowed' }); return; }
+    fetch(u.href, { credentials: 'omit' })
+      .then(async r => sendResponse({ status: r.status, url: r.url, text: await r.text() }))
+      .catch(e => sendResponse({ error: String(e.message || e) }));
+    return true;
+  }
   if (msg.type === 'auction-seen') onAuctionSeen(msg.payload, sender.tab && sender.tab.id, msg.track);
   if (msg.type === 'debug-dump') {
     chrome.storage.local.set({ debugDump: msg.dump });

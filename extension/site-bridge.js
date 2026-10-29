@@ -11,6 +11,7 @@
       else if (d.op === 'get') result = await chrome.storage.local.get(d.args);
       else if (d.op === 'set') result = await chrome.storage.local.set(d.args);
       else if (d.op === 'remove') result = await chrome.storage.local.remove(d.args);
+      else if (d.op === 'fetch') result = await chrome.runtime.sendMessage({ type: 'pc-fetch', url: d.args });
       else if (d.op === 'send') { chrome.runtime.sendMessage(d.args).catch(() => {}); result = true; }
       reply(d.id, result === undefined ? true : result);
     } catch (err) { reply(d.id, null, err.message); }
