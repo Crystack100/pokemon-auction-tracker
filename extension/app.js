@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.21.0';
+  const SITE_VERSION = '0.21.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -191,9 +191,9 @@ function countdownText(iso) {
     if (gm) sales = sales.filter(s => new RegExp(`\\b${gm[1]}\\s*${gm[2].replace('.', '\\.')}(?![\\d.])`, 'i').test(s.title || ''));
     else if (isSingleCard(a)) sales = sales.filter(s => !GRADED_TITLE.test(s.title || ''));
     const otherGrade = before - sales.length;
-    // A single item: leave out lots and bundles ("3 ETBs total", "x2", "bundle"), which inflate the average.
+    // Searched as one item (a lot's price is one item's times the quantity): leave out lots and bundles ("3 ETBs total", "x2", "bundle"), which inflate the average.
     const beforeLots = sales.length;
-    if (qtyOf(a) === 1) sales = sales.filter(s => !LOT_TITLE.test(s.title || '') && !lotQty(s.title || ''));
+    sales = sales.filter(s => !LOT_TITLE.test(s.title || '') && !lotQty(s.title || ''));
     const lots = beforeLots - sales.length;
     if (a.cardNumber && all.length && !sales.length) return null;
     if (!sales.length) return auto.average && auto.currency !== 'USD' ? { average: auto.average, count: auto.count, legacy: true } : null;
@@ -258,7 +258,11 @@ function countdownText(iso) {
   const LOT_TITLE = /\b(lot|bundle|bulk|joblot|job lot|set of \d+|\d+\s*(etbs|boxes|tins|packs|cards)|total|combo)\b|\b(and|&|\+)\s+\w+.*\b(etb|box)\b.*\b(etb|box)\b/i;
   const searchNo = n => !n ? '' : /[a-z]/i.test(n) ? n.split('/')[0] : n;
   // Card name plus its number; without a number, the set name narrows it down instead.
-  function ebayQuery(a) { return (a.ebayQuery || `${(a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '')} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
+  // The name of one item: without the seller's lot label ("Lot 3") or the quantity ("3x", "x3", "Lot of 3"),
+  // so eBay and PriceCharting are searched for a single one and the price is multiplied by the quantity.
+  const LOT_LABEL = /^\s*(?:auction\s*)?lot\s*#?\s*\d{1,3}\b\s*[-–:.)]?\s*/i;
+  const singleName = a => (a.cardName || '').replace(LOT_LABEL, '').replace(/\blot of \d{1,2}\b/i, '').replace(/(^|\s)\d{1,2}\s*[x×](?=\s)/i, ' ').replace(/\s[x×]\s?\d{1,2}\b/i, ' ').replace(/\s+/g, ' ').trim();
+  function ebayQuery(a) { return (a.ebayQuery || `${singleName(a)} ${a.cardNumber ? searchNo(a.cardNumber) : a.setName || ''} ${a.grade || ''}`).replace(/\s+/g, ' ').trim(); }
   // Does an eBay listing title show this card's number? ("RC22/RC25" matches "RC22", "rc 22", "RC22/RC25")
   function sameNumber(title, n) {
     const [first, second] = n.split('/');
@@ -385,7 +389,7 @@ function countdownText(iso) {
   }
   function pcQuery(a) {
     if (a.pcQuery) return a.pcQuery;
-    const name = (a.cardName || '').replace(/^\s*\d{1,2}\s*[x×]\s+/i, '').replace(/\s+[x×]\s?\d{1,2}\b/i, '').replace(/\b(PSA|BGS|CGC|TAG|ACE|SGC)\s*[\d.]+\b/gi, '').replace(/\bETB\b/i, 'Elite Trainer Box').replace(/\b(factory sealed|sealed|brand new|english)\b/gi, '');
+    const name = singleName(a).replace(/\b(PSA|BGS|CGC|TAG|ACE|SGC)\s*[\d.]+\b/gi, '').replace(/\bETB\b/i, 'Elite Trainer Box').replace(/\b(factory sealed|sealed|brand new|english)\b/gi, '');
     // PriceCharting writes card numbers as "#RC22" or "#113", so only the first part is searched.
     return `${name} ${a.cardNumber ? a.cardNumber.split('/')[0] : ''}`.replace(/\s+/g, ' ').trim();
   }
@@ -687,7 +691,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   // Anything you corrected in "Fix details" is kept.
   // "2 x Prismatic ETB", "Prismatic ETB x3", "Lot of 4 ..." -> how many of the item are in the lot.
   function lotQty(title) {
-    const m = title.match(/^\s*(\d{1,2})\s*[x×]\s+\S/i) || title.match(/\S\s+[x×]\s?(\d{1,2})\b/i) || title.match(/\blot of (\d{1,2})\b/i);
+    title = title.replace(LOT_LABEL, ''); // "Lot 3 3x Booster Box": the 3 after "Lot" is the seller's lot number
+    const m = title.match(/(?:^|\s)(\d{1,2})\s*[x×]\s+\S/i) || title.match(/\S\s+[x×]\s?(\d{1,2})\b/i) || title.match(/\blot of (\d{1,2})\b/i);
     const n = m ? +m[1] : 1;
     return n >= 2 && n <= 50 ? n : null;
   }
