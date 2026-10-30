@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.20.2';
+  const SITE_VERSION = '0.20.3';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -550,8 +550,6 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       <div class="body">
         <dl>
           <dt>Reserve</dt><dd${reserveMet == null ? '' : ` class="${reserveMet ? 'met' : 'unmet'}" title="${reserveMet ? 'Reserve met' : 'Reserve not met yet'}"`}>${reserve}</dd>
-          ${a.nextBid != null && !countdownText(endOf(a)).ended ? `<dt>Next bid</dt><dd title="${esc(`$${a.incLow} steps${a.incAt != null && a.incHigh !== a.incLow ? ` up to $${a.incAt}, then $${a.incHigh}` : ''}${a.wholeDollars ? ', whole dollars' : ''}`)}">${money(a.nextBid)} or more</dd>` : ''}
-          ${a.incLow != null ? `<dt>Increments</dt><dd>$${a.incLow}${a.incAt != null && a.incHigh !== a.incLow ? ` to $${a.incAt}, then $${a.incHigh}` : ''}${a.wholeDollars ? ' · whole $' : ''}</dd>` : ''}
           ${a.antiSnipe ? `<dt>Anti-snipe</dt><dd>+${a.antiSnipeMins || 5} min for bids in the last ${a.antiSnipeWindow || a.antiSnipeMins || 5} min</dd>` : ''}
         </dl>
         <div class="ends">
