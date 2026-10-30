@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.21.1';
+  const SITE_VERSION = '0.21.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -562,8 +562,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         </div>
         ${a.fromSaved && !a.endsAt ? '<p class="hint">Added from your Facebook Saved folder. Its details fill in automatically, or as soon as you open the post on Facebook.</p>' : ''}
         <div class="market">
-          <label>PriceCharting search<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
-          <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
+          
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
@@ -586,6 +585,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
             <label>Ends<input data-field="ends" type="datetime-local" value="${isoToWall(a.endsAt, a.zone || 'QLD')}"></label>
             <label>Quantity in lot<input data-field="qty" inputmode="numeric" value="${a.qty > 1 ? a.qty : ''}" placeholder="1"></label>
             <label>Market value $<input data-field="marketValue" inputmode="decimal" value="${a.ebaySold ?? ''}" placeholder="PriceCharting / eBay"></label>
+            <label style="grid-column:1/-1">eBay search words<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
+            <label style="grid-column:1/-1">PriceCharting search words<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
             <label>Time zone<select data-field="zone">${ZONE_CHOICES.map(([z, t]) => `<option value="${z}"${(a.zone || 'QLD') === z ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
           </div>
           <div class="foot" style="margin-top:8px">
