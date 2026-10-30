@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.19.6';
+  const SITE_VERSION = '0.20.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -79,6 +79,9 @@ Reply`;
         chrome.storage.onChanged.addListener(async (_c, name) => { if (name === 'local') cb(await all()); });
       },
       save(a) { return area.set({ ['auction:' + a.id]: a }); },
+      // Change only these fields on the saved auction, so a change made meanwhile (an eBay or
+      // PriceCharting result, new bids) isn't overwritten by this page's older copy.
+      async patch(id, patch) { const k = 'auction:' + id; const cur = (await area.get(k))[k]; if (cur) await area.set({ [k]: { ...cur, ...patch } }); },
       remove(id) { return area.remove('auction:' + id); },
     };
   }
@@ -164,11 +167,12 @@ function countdownText(iso) {
 
   // Price you'd actually pay (bid + postage) against the last eBay sale.
   // A price typed in by hand wins over the automatic eBay lookup.
-  // Market value: a value you typed in Fix details wins; then PriceCharting (in AUD); then the eBay AU average. Times the quantity.
+  // Market value: a value you typed in Fix details wins; then the eBay AU average of recent sales;
+  // then PriceCharting (in AUD) when there's no eBay average. Times the quantity.
   const marketPrice = a => {
     if (a.ebaySold != null) return a.ebaySold;
-    const pc = pcPrice(a); if (pc) return pc.aud * qtyOf(a);
-    const m = ebayMarket(a); return m ? m.average * qtyOf(a) : null;
+    const m = ebayMarket(a); if (m) return m.average * qtyOf(a);
+    const pc = pcPrice(a); return pc ? pc.aud * qtyOf(a) : null;
   };
   const qtyOf = a => (a.qty > 1 ? a.qty : 1);
 
@@ -389,17 +393,17 @@ function countdownText(iso) {
   const usd = t => { const n = parseFloat(String(t || '').replace(/[^\d.]/g, '')); return n > 0 ? n : null; };
   // One product page: its name, set, and the price under each column (Ungraded, Grade 9, PSA 10…).
   function pcReadProduct(doc, url) {
-    const table = doc.querySelector('#price_data');
-    if (!table) return null;
-    const heads = [...table.querySelectorAll('thead th, tr:first-child th')].map(th => th.textContent.replace(/\s+/g, ' ').trim());
+    const table = doc.querySelector('#price_data') || doc;
+    if (doc.querySelector('#games_table') || !doc.querySelector('[id$="_price"]')) return null; // a search results page
+    const heads = table === doc ? [] : [...table.querySelectorAll('thead th, tr:first-child th')].map(th => th.textContent.replace(/\s+/g, ' ').trim());
     const prices = {};
-    const cells = [...table.querySelectorAll('td[id$="_price"]')];
+    const cells = [...table.querySelectorAll('td[id$="_price"]')].filter(td => PC_LABELS[td.id] || table !== doc);
     cells.forEach((td, i) => {
       const label = (heads.length === cells.length ? heads[i] : '') || PC_LABELS[td.id] || td.id;
       const v = usd((td.querySelector('.price, .js-price') || td).textContent);
       if (v && !(label in prices)) prices[label] = v;
     });
-    const h1 = doc.querySelector('h1#product_name, #product_name');
+    const h1 = doc.querySelector('h1#product_name, #product_name, h1');
     const set = h1 && h1.querySelector('a') ? h1.querySelector('a').textContent.trim() : '';
     const name = h1 ? h1.childNodes[0].textContent.replace(/\s+/g, ' ').trim() : '';
     return { name, set, url, prices };
@@ -499,6 +503,7 @@ function countdownText(iso) {
   function pcExplain(a) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
+    if (pc.status !== 'ok' && ebayMarket(a)) return '';
     if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">PriceCharting doesn't allow automatic checks. Press "PriceCharting ↗" below once and its price is saved here.</span>`;
     if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here. If PriceCharting doesn't have it, the eBay AU average is used.</span>`;
     if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
@@ -507,7 +512,7 @@ function countdownText(iso) {
     const q = qtyOf(a);
     const all = Object.entries(pc.prices).map(([l, v]) => `${esc(l)} US${money(v)}`).join(' · ');
     if (!p) return `<span class="hint">PriceCharting has no ${esc(a.grade || 'ungraded')} price for <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}</a>. ${all}</span>`;
-    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
+    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${ebayMarket(a) ? ' (for comparison; the eBay AU average is used)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
       <details class="how"><summary>How this was worked out</summary><p class="hint">Matched <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}${pc.set ? ' (' + esc(pc.set) + ')' : ''}</a> on PriceCharting, searched as "${esc(pc.query)}". Its ${esc(p.label)} price is US${money(p.usd)}, which is ${money(p.aud)} at ${esc(audRateNote || `US$1 = A$${p.rate.toFixed(2)}`)}.${q > 1 ? ` This lot has ${q} items, so ${money(p.aud)} × ${q} = ${money(p.aud * q)}.` : ''} PriceCharting's price is its average of recent sold listings for that exact product and grade. Checked ${esc(ago(pc.checkedAt))}.</p><p class="hint">All its prices: ${all}</p></details>`;
   }
   function renderCard(a) {
@@ -560,8 +565,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
 ` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
-          ${pcExplain(a)}
           ${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
+          ${pcExplain(a)}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         ${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" class="update-row" data-act="update-now">↻ Update bids</button>' : ''}
@@ -793,7 +798,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   }
 
   async function updateField(a, patch) {
-    try { await store.save({ ...a, ...patch }); }
+    try { await (store.patch ? store.patch(a.id, patch) : store.save({ ...a, ...patch })); }
     catch (e) { $('storeStatus').textContent = 'Not saved: ' + (e.message || e.code); }
   }
 

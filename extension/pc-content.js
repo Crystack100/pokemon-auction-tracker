@@ -8,10 +8,11 @@
   let id = m ? m[1] : null;
   try { id = id || sessionStorage.getItem('patId'); } catch {}
   if (!id) return;
-  const part = sel => { const el = document.querySelector(sel); return el ? el.outerHTML : ''; };
-  const product = part('#product_name') && part('#price_data');
-  const html = part('#product_name') + part('#price_data') + part('#games_table');
-  if (!html) return;
+  // The page without scripts, images and styling (the tracker finds the product name and prices in it).
+  const copy = document.body.cloneNode(true);
+  copy.querySelectorAll('script, style, noscript, svg, img, iframe, video, link, header, footer, nav').forEach(n => n.remove());
+  const html = copy.outerHTML.replace(/\s+/g, ' ');
+  const product = !!document.querySelector('#price_data, [id$="_price"]') && !document.querySelector('#games_table');
   chrome.runtime.sendMessage({ type: 'pc-page', id, url: location.href.split('#')[0], html });
   const note = document.createElement('div');
   note.textContent = product ? 'Saved this price to your auction tracker ✓' : 'Pick the right product below and its price is saved to your auction tracker.';
