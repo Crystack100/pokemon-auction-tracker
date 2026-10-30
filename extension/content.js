@@ -375,9 +375,66 @@
     return { at: new Date().toISOString(), version: chrome.runtime.getManifest().version, comments: allComments(post, postText(post)), images: postImages(post).length, photoSet: photoSet(post), photos: photoInfo(post), outline: out.join('\n') };
   }
 
+  /* ---------- Saved folder ----------
+     On your Facebook Saved page (or one of its collections), lists the group posts saved there.
+     Press "Track all" once and they're all tracked; after that, opening the same folder tracks
+     anything new you saved to it. Nothing is clicked: the posts are read in the background. */
+  function savedPosts() {
+    const out = new Map();
+    for (const a of document.querySelectorAll('[role="main"] a[href]')) {
+      const h = a.href;
+      let m = h.match(/\/groups\/([^/?#]+)\/(?:posts|permalink)\/(\d+)/);
+      const url = m ? `https://www.facebook.com/groups/${m[1]}/posts/${m[2]}/` : null;
+      if (!m) { const mm = h.match(/multi_permalinks=(\d+)/) || h.match(/[?&]story_fbid=(\d+)/); if (mm) m = [null, null, mm[1]]; }
+      if (!m || out.has(m[2])) continue;
+      // The saved item around the link: climb while it still holds only this one post.
+      const POSTLINK = 'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="multi_permalinks"]';
+      let box = a; for (let i = 0; i < 6 && box.parentElement && box.parentElement.querySelectorAll(POSTLINK).length <= 1 && box.parentElement.getAttribute('role') !== 'main'; i++) box = box.parentElement;
+      out.set(m[2], { id: m[2], groupId: m[1], url: url || h.split('#')[0], text: (box.innerText || a.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300) });
+    }
+    return [...out.values()];
+  }
+  let savedBusy = false;
+  async function savedScan() {
+    if (!/^\/saved\b/.test(location.pathname)) { document.getElementById('pat-saved')?.remove(); return; }
+    const folder = new URLSearchParams(location.search).get('list_id') || 'all';
+    const list = savedPosts();
+    const st = await chrome.storage.local.get(null);
+    const auto = ((st.settings || {}).savedFolders || []).includes(folder);
+    const fresh = list.filter(p => { const a = st['auction:' + p.id]; return !a || a.tracked === false || a.dismissed; });
+    let bar = document.getElementById('pat-saved');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'pat-saved';
+      bar.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99999;background:#141a2b;color:#fff;padding:12px 14px;border-radius:10px;font:600 14px/1.35 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:340px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+      bar.addEventListener('click', async e => {
+        const act = e.target.dataset && e.target.dataset.act;
+        if (!act) return;
+        const s = (await chrome.storage.local.get('settings')).settings || {};
+        const folders = new Set(s.savedFolders || []);
+        if (act === 'track') folders.add(folder); else folders.delete(folder);
+        await chrome.storage.local.set({ settings: { ...s, savedFolders: [...folders] } });
+        if (act === 'track') trackSaved(savedPosts());
+        savedScan();
+      });
+      document.body.append(bar);
+    }
+    const btn = 'border:0;border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer';
+    bar.innerHTML = auto
+      ? `<span>✓ Tracking this folder: posts you save here are tracked when you open it.</span><button data-act="stop" style="${btn};background:#59607a;color:#fff">Stop</button>`
+      : `<span>${list.length ? `${list.length} saved post${list.length === 1 ? '' : 's'} here.` : 'No group posts found here yet.'}</span>${list.length ? `<button data-act="track" style="${btn};background:#1e8e4a;color:#fff">Track all${fresh.length < list.length ? ` (${fresh.length} new)` : ''}</button>` : ''}`;
+    if (auto && fresh.length && !savedBusy) trackSaved(fresh);
+  }
+  function trackSaved(list) {
+    if (!list.length) return;
+    savedBusy = true;
+    chrome.runtime.sendMessage({ type: 'track-saved', posts: list.slice(0, 40) }).catch(() => {});
+    setTimeout(() => { savedBusy = false; }, 30000);
+  }
+
   let timer = null;
-  const soon = () => { clearTimeout(timer); timer = setTimeout(scan, 800); };
-  new MutationObserver(muts => { if (muts.some(m => [...m.addedNodes].some(n => !(n.classList && n.classList.contains('pat-bar'))))) soon(); })
+  const soon = () => { clearTimeout(timer); timer = setTimeout(() => { scan(); savedScan(); }, 800); };
+  new MutationObserver(muts => { if (muts.some(m => [...m.addedNodes].some(n => !(n.classList && n.classList.contains('pat-bar')) && n.id !== 'pat-saved' && !(n.closest && n.closest('#pat-saved'))))) soon(); })
     .observe(document.body, { childList: true, subtree: true });
   soon();
 })();

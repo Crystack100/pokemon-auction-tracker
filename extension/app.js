@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.20.0';
+  const SITE_VERSION = '0.20.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -558,6 +558,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           <span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span>
           <span class="when">${endOf(a) ? (a.extendedTo ? `Extended by anti-snipe (was ${esc(localTimeText(a.endsAt))})<br>` : '') + esc(localTimeText(endOf(a))) : ''}</span>
         </div>
+        ${a.fromSaved && !a.endsAt ? '<p class="hint">Added from your Facebook Saved folder. Open the post on Facebook or press Update bids to read its details.</p>' : ''}
         <div class="market">
           <label>PriceCharting search<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
           <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>

@@ -220,7 +220,29 @@ async function fetchPhotos(id) {
   }
 }
 
-async function silentCheck(url, groupId, targetId) {
+// Posts from your Facebook Saved folder: track each one and read it in the background (no tabs).
+// A post that can't be read that way is still tracked from the bit of text the Saved page showed,
+// and fills in the first time you open it or press Update.
+async function trackSaved(posts) {
+  const report = { at: new Date().toISOString(), saved: posts.length, tracked: 0, unread: 0 };
+  for (const s of posts) {
+    if (!/^\d+$/.test(s.id)) continue;
+    const before = await getAuction(s.id);
+    if (before && before.tracked !== false && !before.dismissed) continue;
+    await silentCheck(s.url, s.groupId, s.id, true);
+    const now = await getAuction(s.id);
+    if (now && now.tracked !== false && !now.dismissed) report.tracked++;
+    else {
+      await putAuction({ ...(before || {}), id: s.id, source: 'facebook', postUrl: s.url, addedAt: (before && before.addedAt) || report.at,
+        raw: (before && before.raw) || s.text, tracked: true, dismissed: false, fromSaved: true });
+      report.unread++;
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  await chrome.storage.local.set({ lastSaved: report });
+}
+
+async function silentCheck(url, groupId, targetId, track) {
   const report = { at: new Date().toISOString(), url: url.split('?')[0], posts: 0, auctions: 0, mode: 'silent' };
   try {
     const res = await fetch(url, { credentials: 'include', headers: { accept: 'text/html' } });
@@ -229,7 +251,8 @@ async function silentCheck(url, groupId, targetId) {
     const posts = FbJson.extractPosts(html);
     report.posts = posts.length;
     // When checking one tracked auction, make sure the reading lands on that card even if Facebook's ids differ.
-    const target = targetId && (posts.find(p => p.key === targetId) || posts.find(p => AUCTION_RE.test(p.text)));
+    const target = targetId && (posts.find(p => p.key === targetId) || (!track && posts.find(p => AUCTION_RE.test(p.text))));
+    if (track && !target) return;
     if (target) target.key = targetId;
     report.comments = 0;
     for (const p of target ? [target] : posts) { // checking one auction: ignore the other posts on that page
@@ -240,7 +263,7 @@ async function silentCheck(url, groupId, targetId) {
         key: p.key,
         postUrl: p.postUrl || (groupId ? `https://www.facebook.com/groups/${groupId}/posts/${p.key}/` : url),
         seller: p.seller, image: p.image, images: p.images, text: p.text, comments: p.comments, seenAt: report.at, source: 'background',
-      }, null);
+      }, null, track || undefined);
     }
   } catch (e) {
     report.error = e.message;
@@ -261,6 +284,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(e => sendResponse({ error: String(e.message || e) }));
     return true;
   }
+  if (msg.type === 'track-saved' && Array.isArray(msg.posts)) trackSaved(msg.posts);
   if (msg.type === 'auction-seen') onAuctionSeen(msg.payload, sender.tab && sender.tab.id, msg.track);
   if (msg.type === 'debug-dump') {
     chrome.storage.local.set({ debugDump: msg.dump });
