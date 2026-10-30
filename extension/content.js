@@ -237,7 +237,7 @@
   function paintBar(bar) {
     const on = tracked.has(bar.dataset.key);
     bar.innerHTML = on
-      ? `<button type="button" data-act="update" style="${BTN}background:#11804a">✓ Tracking · ↻ Update bids</button><button type="button" data-act="stop" style="${BTN}background:#5b647a">Stop</button>`
+      ? `<span style="${BTN}background:#11804a;cursor:default">✓ Tracking</span><button type="button" data-act="stop" style="${BTN}background:#5b647a">Stop</button>`
       : `<button type="button" data-act="track" style="${BTN}background:#c8202f">+ Track this auction</button>`;
   }
 

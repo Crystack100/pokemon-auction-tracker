@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.20.3';
+  const SITE_VERSION = '0.21.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -556,7 +556,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           <span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span>
           <span class="when">${endOf(a) ? (a.extendedTo ? `Extended by anti-snipe (was ${esc(localTimeText(a.endsAt))})<br>` : '') + esc(localTimeText(endOf(a))) : ''}</span>
         </div>
-        ${a.fromSaved && !a.endsAt ? '<p class="hint">Added from your Facebook Saved folder. Open the post on Facebook or press Update bids to read its details.</p>' : ''}
+        ${a.fromSaved && !a.endsAt ? '<p class="hint">Added from your Facebook Saved folder. Its details fill in automatically, or as soon as you open the post on Facebook.</p>' : ''}
         <div class="market">
           <label>PriceCharting search<input data-field="pcQuery" value="${esc(pcQuery(a))}"></label>
           <label>eBay search<input data-field="ebayQuery" value="${esc(ebayQuery(a))}"></label>
@@ -568,7 +568,6 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${pcExplain(a)}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
-        ${inExtension && /\/posts\/\d+/.test(a.postUrl || '') ? '<button type="button" class="update-row" data-act="update-now">↻ Update bids</button>' : ''}
         <details>
           <summary>Fix details</summary>
           ${inExtension ? '' : `<p class="hint">Copy the post again from Facebook with the newest comments and paste it here.</p>
@@ -735,13 +734,13 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         high = x.amount; valid.push(x);
       }
     }
-    // Anti-snipe: each counted bid placed within the last few minutes before the current end adds the
-    // stated minutes to the end, so later bids are checked against the new end.
+    // Anti-snipe: a counted bid placed within the last few minutes before the current end moves the
+    // end to that bid's time plus the stated minutes; later bids are checked against the new end.
     if (endMs && out.antiSnipe) {
       const add = (out.antiSnipeMins || 5) * 60e3, win = (out.antiSnipeWindow || out.antiSnipeMins || 5) * 60e3;
       for (const { c } of valid.filter(x => x.c.at)) {
         if (c.at > endMs) break;
-        if (c.at >= endMs - win) endMs += add;
+        if (c.at >= endMs - win) endMs = Math.max(endMs, c.at + add);
       }
       if (endMs > endsMs) out.extendedTo = new Date(endMs).toISOString();
     }
@@ -952,14 +951,12 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         catch { $('debugText').select(); $('debugCopy').textContent = 'Press Ctrl/Cmd+C'; }
       });
       $('debugClear').addEventListener('click', () => chrome.storage.local.remove('debugDump'));
-      $('updateAll').hidden = false;
-      $('autoRow').hidden = false;
-      $('updateAll').addEventListener('click', () => { chrome.runtime.sendMessage({ type: 'update-now' }); $('storeStatus').textContent = 'Updating your tracked auctions…'; });
       const saveSetting = async patch => { const { settings } = await chrome.storage.local.get('settings'); await chrome.storage.local.set({ settings: { ...(settings || {}), ...patch } }); };
       chrome.storage.local.get('settings').then(({ settings }) => {
-        $('autoRefresh').checked = !settings || settings.autoUpdate !== false;
-        // Opening or refreshing the tracker fetches fresh bids in the background (no tabs, no clicks).
-        if (!settings || settings.autoUpdate !== false) chrome.runtime.sendMessage({ type: 'update-now' });
+        // Bids always update by themselves: in the background while Chrome is open, and right away
+        // when the tracker opens (no buttons). Turns auto-update back on if it was switched off before.
+        if (settings && settings.autoUpdate === false) saveSetting({ autoUpdate: true });
+        chrome.runtime.sendMessage({ type: 'update-now' });
         $('sweepMinutes').value = String(settings && settings.sweepMinutes != null ? settings.sweepMinutes : 5);
       });
       $('sweepMinutes').addEventListener('change', e => saveSetting({ sweepMinutes: Number(e.target.value) }));
@@ -968,7 +965,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         $('storeStatus').textContent = !r ? 'Press "+ Track this auction" on Facebook to add auctions. Update them whenever you like.'
           : r.error === 'logged-out' ? 'Update failed: you seem to be logged out of Facebook in Chrome.'
           : r.error ? `Update ${ago(r.at)} failed (${r.error}).`
-          : r.mode === 'silent' && !r.posts ? `Update ${ago(r.at)} couldn't read the post. Open it on Facebook and press "↻ Update bids" there instead.`
+          : r.mode === 'silent' && !r.posts ? `Update ${ago(r.at)} couldn't read the post. It updates again on its own, or straight away when you open the post on Facebook.`
           : `Last update ${ago(r.at)}${r.comments != null ? ` · read ${r.comments} comment${r.comments === 1 ? '' : 's'}` : ''}`;
       };
       chrome.storage.local.get('lastScan').then(r => showScan(r.lastScan));
@@ -992,7 +989,6 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       });
       $('checkNow').addEventListener('click', () => { chrome.runtime.sendMessage({ type: 'check-now' }); $('watchNote').textContent = 'Checking now…'; });
       chrome.storage.onChanged.addListener(c => { if (c.lastScan) showScan(c.lastScan.newValue); });
-      $('autoRefresh').addEventListener('change', e => saveSetting({ autoUpdate: e.target.checked }));
     }
     // The paste-a-post form starts hidden so it doesn't flash on load; without the extension it's the way in.
     if (!inExtension) $('bench').hidden = false;
