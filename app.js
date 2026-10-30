@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.20.1';
+  const SITE_VERSION = '0.20.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -668,7 +668,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const avg = marketPrice(a);
       const bid = a.currentBid ?? a.startBid ?? (avg ? 0 : null); // no bids yet counts as $0
       return { a, bid, avg, diff: bid != null && avg ? avg - bid : null, pct: bid != null && avg ? (avg - bid) / avg : null };
-    }).sort((x, y) => (y.pct ?? -9) - (x.pct ?? -9));
+    }).filter(r => r.diff != null && r.diff > 0) // only auctions whose bid is under the market value
+      .sort((x, y) => y.pct - x.pct);
     $('underList').innerHTML = rows.length ? rows.map(({ a, bid, avg, diff, pct }) => {
       const cd = countdownText(endOf(a));
       const diffCell = diff == null ? (avg ? '' : `<a href="${esc(marketLinks(a)[0][1])}" target="_blank" rel="noopener">eBay AU sold ↗</a>`)
@@ -681,7 +682,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         <td class="num">${diffCell}</td>
         <td class="num"><span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span></td>
       </tr>`;
-    }).join('') : `<tr><td colspan="5" class="hint">No live tracked auctions yet.</td></tr>`;
+    }).join('') : `<tr><td colspan="5" class="hint">No live auctions are under market value right now.</td></tr>`;
   }
 
   // Facebook auctions are re-read from the saved post text and comments every time the page loads,
@@ -767,7 +768,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const now = Date.now();
     let list = auctions.filter(isTracked);
     if (filter === 'live') list = list.filter(a => !endOf(a) || new Date(endOf(a)) > now);
-    if (filter === 'under') list = list.filter(a => verdict(a).cls === 'good');
+    if (filter === 'under') list = list.filter(a => { const m = marketPrice(a), b = a.currentBid ?? a.startBid ?? 0; return m && b < m; });
     const endKey = a => endOf(a) ? (new Date(endOf(a)) < now ? 9e15 + +new Date(endOf(a)) : +new Date(endOf(a))) : 8e15;
     if (sort === 'ends') list.sort((a, b) => endKey(a) - endKey(b));
     if (sort === 'deal') list.sort((a, b) => (verdict(a).ratio ?? 9) - (verdict(b).ratio ?? 9));
