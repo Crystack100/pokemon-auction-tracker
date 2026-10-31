@@ -75,9 +75,14 @@ window.PhotoId = (() => {
     const rarity = (RARITIES.find(([re]) => re.test(title || '')) || [])[1];
     if (!pokemon || !rarity) return null;
     const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
-    const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(`${nameQ} rarity:"${rarity}"`) + '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=20');
-    const cards = (r && r.data) || [];
-    if (!cards.length) return null;
+    const get = async q => { const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(q) + '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=50'); return (r && r.data) || []; };
+    let cards = await get(`${nameQ} rarity:"${rarity}"`);
+    // The card list may word the rarity differently: all cards of this Pokémon, keeping the ones whose rarity fits.
+    if (!cards.length) {
+      const fit = rarity === 'Special Illustration Rare' ? /special illustration|special art/i : rarity === 'Illustration Rare' ? /illustration|art rare/i : rarity === 'Hyper Rare' ? /hyper|secret|gold/i : /ultra|full art/i;
+      cards = (await get(nameQ)).filter(c => fit.test(c.rarity || '') && !(rarity === 'Illustration Rare' && /special/i.test(c.rarity || '')));
+    }
+    if (!cards.length) return { status: 'none', pokemon, rarity, note: `The card list has no ${pokemon} ${rarity}` };
     const digits = (text || '').replace(/\s+/g, '');
     const c = cards.find(c => digits.includes(`${c.number}/${c.set.printedTotal}`)) || cards.find(c => new RegExp(`(^|\\D)${c.number}(\\D|$)`).test(digits)) || cards[0];
     return { status: 'ok', name: c.name, set: c.set.name, number: `${c.number}/${c.set.printedTotal}`, rarity: c.rarity || '', pokemon, matches: cards.length, guessed: cards.length > 1 && c === cards[0] };
@@ -96,7 +101,7 @@ window.PhotoId = (() => {
     const pokemon = (mon && mon[0]) || await titlePokemon(title);
     let found = null;
     if (num && (num[1] >= 2 || titles.length === 1)) { const [n, total] = num[0].split('/'); found = await lookup(pokemon, [{ n, total }], fetchJson, title) || await lookup(null, [{ n, total }], fetchJson, pokemon || title); }
-    if (!found && pokemon && rar) found = await byName(pokemon, rar[0], titles.join(' '), fetchJson);
+    if (!found && pokemon && rar) { const b = await byName(pokemon, rar[0], titles.join(' '), fetchJson); if (b && b.status === 'ok') found = b; }
     const sample = titles.slice(0, 3);
     if (found) return { ...found, source: 'ebay', distinct: 1, titles: sample };
     return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
@@ -110,11 +115,12 @@ window.PhotoId = (() => {
       if (nums.length) break;
     }
     const named = (await titlePokemon(title)) || pokemon;
-    const found = (nums.length ? await lookup(named, nums, fetchJson, title) || await lookup(pokemon, nums, fetchJson, title) : null) ||
-      await byName(named, title, text, fetchJson);
+    let found = nums.length ? await lookup(named, nums, fetchJson, title) || await lookup(pokemon, nums, fetchJson, title) : null;
+    let note = '';
+    if (!found) { const b = await byName(named, title, text, fetchJson); if (b && b.status === 'ok') found = b; else if (b) note = b.note; }
     const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 200);
     if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
-    return pokemon ? { status: 'partial', pokemon, distinct: nums.length, text: excerpt } : { status: 'none', text: excerpt };
+    return pokemon || named ? { status: 'partial', pokemon: pokemon || named, distinct: nums.length, text: excerpt, note } : { status: 'none', text: excerpt, note };
   }
   return { identify, fromTitles, numbersIn, pokemonIn };
 })();

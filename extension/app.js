@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.26.0';
+  const SITE_VERSION = '0.26.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -528,7 +528,7 @@ function countdownText(iso) {
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 2) || (ebayKeys && !a.photoId.ebayTried && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 3) || (ebayKeys && !a.photoId.ebayTried && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
       for (const a of due) {
         let result;
         try {
@@ -552,7 +552,7 @@ function countdownText(iso) {
           result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title);
           if (ebay) result = { ...result, ebayTried: true, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
-        await store.patch(a.id, { photoId: { ...result, v: 2, key: photoIdKey(a), at: new Date().toISOString() } });
+        await store.patch(a.id, { photoId: { ...result, v: 3, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       }
     } finally { photoIdRunning = false; }
@@ -618,6 +618,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
+          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? ` (${esc(a.photoId.error)})` : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
           ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
