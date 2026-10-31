@@ -107,6 +107,9 @@ label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transfo
 .price .k { font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .price .v { font: 700 2.2rem/1 var(--display); font-variant-numeric: tabular-nums; }
 .price .who { font-size: .82rem; color: var(--muted); overflow-wrap: anywhere; }
+.src-switch { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: .8rem; }
+.src-switch button { font: inherit; font-size: .78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; background: transparent; color: inherit; border: 1px solid currentColor; opacity: .6; }
+.src-switch button[aria-pressed="true"] { opacity: 1; background: var(--accent, #d62f3a); border-color: transparent; color: #fff; }
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; width: fit-content; }
 dd.met { color: var(--good); font-weight: 700; }
 dd.unmet { color: var(--bad); font-weight: 700; }
@@ -289,7 +292,7 @@ ol.sales li.dropped { text-decoration: line-through; }
   <section id="underSection" class="under" hidden aria-labelledby="underTitle">
     <div>
       <h2 id="underTitle">Undervalued</h2>
-      <p class="hint">Only live auctions where the current bid is under market value (from the source you pick in Tracking: eBay AU sold or PriceCharting). Biggest bargains first.</p>
+      <p class="hint">Only live auctions where the current bid is under market value (eBay AU sold, or PriceCharting on cards you switched to it). Biggest bargains first.</p>
     </div>
     <div class="under-wrap"><table class="under-table">
       <thead><tr><th scope="col">Auction</th><th scope="col" class="num">Current bid</th><th scope="col" class="num">Market value</th><th scope="col" class="num">Difference</th><th scope="col" class="num">Ends in</th></tr></thead>
@@ -317,12 +320,6 @@ ol.sales li.dropped { text-decoration: line-through; }
             <option value="live">Live auctions</option>
             <option value="under">Under market</option>
             <option value="all">All, including ended</option>
-          </select>
-        </label>
-        <label>Market price from
-          <select id="priceSource">
-            <option value="ebay">eBay AU sold</option>
-            <option value="pc">PriceCharting</option>
           </select>
         </label>
         <label>Sort

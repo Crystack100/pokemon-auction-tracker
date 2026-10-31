@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.22.0';
+  const SITE_VERSION = '0.22.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -169,15 +169,13 @@ function countdownText(iso) {
   // A price typed in by hand wins over the automatic eBay lookup.
   // Market value: a value you typed in Fix details wins; then the eBay AU average of recent sales;
   // then PriceCharting (in AUD) when there's no eBay average. Times the quantity.
-  // Which one comes first is your choice ("Market price from"); the other is used when the first has no price.
-  let priceSource = 'ebay';
-  try { priceSource = localStorage.getItem('pat-price-source') || 'ebay'; } catch {}
+  // eBay AU sold by default; switch a card to PriceCharting with the buttons on it when its eBay price
+  // looks wrong. A card on eBay with no eBay price yet uses PriceCharting if it has one.
   const marketSource = a => {
     if (a.ebaySold != null) return 'typed';
     if (a.wholeLot) return null;
-    const has = { ebay: !!ebayMarket(a), pc: !!pcPrice(a) };
-    const other = priceSource === 'pc' ? 'ebay' : 'pc';
-    return has[priceSource] ? priceSource : has[other] ? other : null;
+    if (a.priceSource === 'pc') return pcPrice(a) ? 'pc' : null;
+    return ebayMarket(a) ? 'ebay' : pcPrice(a) ? 'pc' : null;
   };
   const marketPrice = a => {
     const src = marketSource(a);
@@ -530,7 +528,7 @@ function countdownText(iso) {
     const q = qtyOf(a);
     const all = Object.entries(pc.prices).map(([l, v]) => `${esc(l)} US${money(v)}`).join(' · ');
     if (!p) return `<span class="hint">PriceCharting has no ${esc(a.grade || 'ungraded')} price for <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}</a>. ${all}</span>`;
-    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${marketSource(a) === 'ebay' ? ' (for comparison; the eBay AU average is used)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
+    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${marketSource(a) === 'ebay' ? ' (for comparison; this card uses eBay)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
       <details class="how"><summary>How this was worked out</summary><p class="hint">Matched <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}${pc.set ? ' (' + esc(pc.set) + ')' : ''}</a> on PriceCharting, searched as "${esc(pc.query)}". Its ${esc(p.label)} price is US${money(p.usd)}, which is ${money(p.aud)} at ${esc(audRateNote || `US$1 = A$${p.rate.toFixed(2)}`)}.${q > 1 ? ` This lot has ${q} items, so ${money(p.aud)} × ${q} = ${money(p.aud * q)}.` : ''} PriceCharting's price is its average of recent sold listings for that exact product and grade. Checked ${esc(ago(pc.checkedAt))}.</p><p class="hint">All its prices: ${all}</p></details>`;
   }
   function renderCard(a) {
@@ -581,6 +579,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
 ` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
+          ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
+          ${a.priceSource === 'pc' && !a.wholeLot && a.ebaySold == null && !pcPrice(a) ? '<span class="hint">No PriceCharting price for this card yet. Press "PriceCharting ↗" below and pick the product.</span>' : ''}
           ${a.wholeLot && a.ebaySold == null ? `<span class="hint">A whole lot with no single card named, so there's no eBay or PriceCharting price to compare. Type a market value in Fix details if you have one.</span>` : ''}
           ${a.wholeLot ? '' : ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
           ${a.wholeLot ? '' : pcExplain(a)}
@@ -841,8 +841,6 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       $('trackingSection').hidden = view !== 'tracking';
     }));
     $('sort').addEventListener('change', render);
-    $('priceSource').value = priceSource;
-    $('priceSource').addEventListener('change', e => { priceSource = e.target.value; try { localStorage.setItem('pat-price-source', priceSource); } catch {} render(); });
 
     const pick = () => $('file').click();
     $('drop').addEventListener('click', pick);
@@ -914,6 +912,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (act === 'confirm-delete') { if (a.source === 'facebook') updateField(a, { dismissed: true }); else store.remove(a.id); }
       if (act === 'remove-now') removeWithUndo(a);
       if (act === 'untrack') updateField(a, { tracked: false });
+      if (act === 'src-ebay' || act === 'src-pc') updateField(a, { priceSource: act === 'src-pc' ? 'pc' : 'ebay' });
       if (act === 'update-now') { chrome.runtime.sendMessage({ type: 'update-now', id: a.id }); e.target.textContent = 'Updating…'; }
       if (act === 'recheck') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       if (act === 'update') {
