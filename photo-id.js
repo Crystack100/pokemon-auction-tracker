@@ -66,6 +66,24 @@ window.PhotoId = (() => {
     return null;
   }
 
+  // When the number can't be read: the Pokémon's name (from the post title or the photo) plus the rarity the
+  // title gives ("Illustration", "SIR", "Gold"…). Picks the one card if there's only one, or the one whose
+  // number shows anywhere in the photo text, otherwise the newest printing.
+  const RARITIES = [[/special illustration|\bsir\b|\bsar\b/i, 'Special Illustration Rare'], [/illustration|\bir\b|\bar\b|\bchr\b/i, 'Illustration Rare'],
+    [/hyper|gold|\bur\b/i, 'Hyper Rare'], [/full art|\bfa\b|ultra rare/i, 'Ultra Rare']];
+  async function byName(pokemon, title, text, fetchJson) {
+    const rarity = (RARITIES.find(([re]) => re.test(title || '')) || [])[1];
+    if (!pokemon || !rarity) return null;
+    const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
+    const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(`${nameQ} rarity:"${rarity}"`) + '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=20');
+    const cards = (r && r.data) || [];
+    if (!cards.length) return null;
+    const digits = (text || '').replace(/\s+/g, '');
+    const c = cards.find(c => digits.includes(`${c.number}/${c.set.printedTotal}`)) || cards.find(c => new RegExp(`(^|\\D)${c.number}(\\D|$)`).test(digits)) || cards[0];
+    return { status: 'ok', name: c.name, set: c.set.name, number: `${c.number}/${c.set.printedTotal}`, rarity: c.rarity || '', pokemon, matches: cards.length, guessed: cards.length > 1 && c === cards[0] };
+  }
+  async function titlePokemon(title) { return pokemonIn(title || ''); }
+
   async function identify(dataUrls, fetchJson, title) {
     let text = '', pokemon = null, nums = [];
     for (const d of dataUrls) {
@@ -73,9 +91,11 @@ window.PhotoId = (() => {
       pokemon = await pokemonIn(text); nums = numbersIn(text);
       if (nums.length) break;
     }
-    const found = nums.length ? await lookup(pokemon, nums, fetchJson, title) : null;
+    const named = (await titlePokemon(title)) || pokemon;
+    const found = (nums.length ? await lookup(named, nums, fetchJson, title) || await lookup(pokemon, nums, fetchJson, title) : null) ||
+      await byName(named, title, text, fetchJson);
     const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (found) return { ...found, distinct: nums.length, text: excerpt };
+    if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon ? { status: 'partial', pokemon, distinct: nums.length, text: excerpt } : { status: 'none', text: excerpt };
   }
   return { identify, numbersIn, pokemonIn };
