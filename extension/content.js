@@ -120,9 +120,16 @@
 
   // The post's own id, from any link inside it that carries one (timestamp, photos, comment links).
   const ID_PATTERNS = [/\/groups\/[^/?#]+\/(?:posts|permalink)\/(\d+)/, /[?&]multi_permalinks=(\d+)/, /[?&]story_fbid=(\d+)/, /[?&]set=(?:gm|pcb)\.(\d+)/, /\/posts\/(\d+)/];
+  // The page's address names one post (…/posts/123 or ?multi_permalinks=123). Only the page's first post (or
+  // its pop-up) is that post: the "more posts" Facebook shows under it must not borrow its id, or they show
+  // "✓ Tracking" and their text and photos land on the tracked auction.
+  function isPagePost(post) {
+    if (post.matches('[role="dialog"]')) return true;
+    return posts().find(p => !p.matches('[role="main"], [role="dialog"]')) === post;
+  }
   function postLink(post) {
     const group = (location.pathname.match(/^\/groups\/([^/?#]+)/) || [])[1];
-    const hrefs = [location.href];
+    const hrefs = isPagePost(post) ? [location.href] : [];
     for (const a of post.querySelectorAll('a[href]')) {
       const c = a.closest('[role="article"]');
       if (c && isComment(c) && !/comment_id/.test(a.href)) continue;
@@ -307,8 +314,13 @@
 
   const LOOKS_LIKE_AUCTION = /auction|#auction|\bbids?\b|\bbidding\b|reserve|\bSB\b|starting\s*bid|anti\s*-?\s*snipe/i;
 
+  let lastMe = null;
   function scan() {
     if (!location.pathname.startsWith('/groups/')) return; // Facebook changes pages without reloading
+    // Your own name, from Facebook's "Comment as <your name>" box, so the tracker can tell when you're winning.
+    const box = document.querySelector('[aria-label^="Comment as " i], [aria-placeholder^="Comment as " i], [placeholder^="Comment as " i]');
+    const me = box && (box.getAttribute('aria-label') || box.getAttribute('aria-placeholder') || box.getAttribute('placeholder') || '').replace(/^Comment as\s+/i, '').replace(/[…\.]+$/, '').trim();
+    if (me && me !== lastMe) { lastMe = me; chrome.storage.local.get('settings').then(({ settings }) => { if ((settings || {}).myNameAuto !== me) chrome.storage.local.set({ settings: { ...(settings || {}), myNameAuto: me } }); }).catch(() => {}); }
     // Only posts that look like auctions in the part you can see, plus any you already track.
     // Anything else can still be tracked with right-click → "Track this auction".
     const list = posts();

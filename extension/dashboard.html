@@ -137,6 +137,9 @@ details { font-size: .85rem; }
 details textarea { min-height: 120px; margin-top: 6px; }
 .watch { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .watch-text { display: grid; gap: 2px; min-width: 0; }
+.you-won, .you-lead { display: inline-block; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin: 4px 0; }
+.you-won { background: #1e8e4a; color: #fff; }
+.you-lead { background: color-mix(in srgb, #1e8e4a 22%, transparent); color: inherit; }
 .found { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; display: grid; gap: 10px; }
 .found-list { display: grid; }
 #groupForm select { width: auto; }
@@ -198,11 +201,23 @@ ol.sales li.dropped { text-decoration: line-through; }
     </div>
     <div class="row">
       <button type="button" id="benchToggle" hidden>Add one by hand</button>
+      <button type="button" id="meToggle" hidden>Your Facebook name</button>
       <button type="button" id="imgSearchToggle" hidden>eBay image search</button>
       <span class="status" id="storeStatus">Saved on this device</span>
       <span class="status" id="savedStatus"></span>
     </div>
   </header>
+
+  <section class="watch" id="meBox" hidden aria-labelledby="meTitle">
+    <div class="watch-text">
+      <strong id="meTitle">Your Facebook name</strong>
+      <span class="hint">Bids from this name are yours: the tracker shows "You're the top bidder" and "You won". It's filled in from Facebook's comment box; change it here if it's wrong.</span>
+    </div>
+    <form class="row" id="meForm">
+      <input id="meName" autocomplete="off" aria-label="Your Facebook name" style="width:min(240px,100%)">
+      <button type="submit" class="primary">Save</button>
+    </form>
+  </section>
 
   <section class="watch" id="imgSearchBox" hidden aria-labelledby="imgSearchTitle">
     <div class="watch-text">

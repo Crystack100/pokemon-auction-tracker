@@ -48,6 +48,8 @@ async function onAuctionSeen(p, fromTabId, track) {
       else p = { ...p, key: twin.id };
     }
   }
+  // A reading from a different seller isn't this auction (a neighbouring post that got its id by mistake): ignore it.
+  if (old && !track && old.seller && p.seller && old.seller !== p.seller) return;
   // Only posts you pressed Track on are kept.
   if (track === false) { if (old) await putAuction({ ...old, tracked: false, dismissed: true }); return; }
   if (!track && !(old && old.tracked !== false && !old.dismissed)) return;

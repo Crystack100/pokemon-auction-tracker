@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.26.2';
+  const SITE_VERSION = '0.27.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -600,6 +600,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.example ? '<span class="example-tag">Example</span>' : ''}
           <span class="k">${a.currentBid == null && a.startBid != null ? 'Starting bid' : cd.ended ? 'Final bid' : 'Current bid'}</span>
           <span class="v">${money(a.currentBid ?? a.startBid ?? 0)}</span>
+          ${mine(a) ? (cd.ended ? (a.reserve > 0 && a.currentBid < a.reserve ? '<span class="you-lead">You were top bidder, but the reserve wasn\'t met</span>' : '<span class="you-won">🏆 You won this auction</span>') : '<span class="you-lead">You\'re the top bidder</span>') : a.topBidder && myName && cd.ended ? `<span class="who">Won by ${esc(a.topBidder)}</span>` : ''}
           <span class="who">${a.lateComments ? `${a.lateComments} comment${a.lateComments === 1 ? '' : 's'} after the end not counted · ` : ''}${a.bidCount || 0} bid${a.bidCount === 1 ? '' : 's'}${a.brokenBids ? ` (${a.brokenBids} under the minimum step not counted)` : ''}${a.commentsRead != null ? ` · ${a.commentsRead} comment${a.commentsRead === 1 ? '' : 's'} read` : ''}${a.lastSeenAt ? ' · updated ' + esc(ago(a.lastSeenAt)) : ''}</span>
           <span class="pill ${v.cls}">${v.text}</span>
         </div>
@@ -611,7 +612,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         </dl>
         <div class="ends">
           <span class="countdown${cd.soon ? ' soon' : ''}" data-ends="${endOf(a) || ''}">${cd.text}</span>
-          <span class="when">${endOf(a) ? (a.extendedTo ? `Extended by anti-snipe (was ${esc(localTimeText(a.endsAt))})<br>` : '') + esc(localTimeText(endOf(a))) : ''}</span>
+          <span class="when">${endOf(a) ? esc(localTimeText(endOf(a))) + (a.extendedTo && localTimeText(a.endsAt) !== localTimeText(endOf(a)) ? `<br><small>Anti-snipe extended (was ${esc(localTimeText(a.endsAt).replace(/^.*,\s*(?=[^,]*$)/, ''))})</small>` : '') : ''}</span>
         </div>
         ${a.fromSaved && !a.endsAt ? '<p class="hint">Added from your Facebook Saved folder. Its details fill in automatically, or as soon as you open the post on Facebook.</p>' : ''}
         <div class="market">
@@ -691,6 +692,10 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
   // Undervalued view: every live tracked auction, ranked by how far the bid sits under the eBay average.
   // Ended view: tracked auctions that have finished, with the final bid against the eBay AU average.
   // The last update after the end (the tracker keeps checking for 10 minutes) records the final bid.
+  // You: your Facebook name (read from Facebook, or typed on the tracker). Your bids are matched by it.
+  let myName = '';
+  const normName = n => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const mine = a => !!(myName && a.topBidder && normName(a.topBidder) === normName(myName));
   function renderEnded() {
     const now = Date.now();
     const done = auctions.filter(a => isTracked(a) && endOf(a) && new Date(endOf(a)) <= now)
@@ -703,6 +708,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const avg = marketPrice(a);
       const reserveMissed = a.reserve > 0 && bid != null && bid < a.reserve;
       const result = bid == null ? '<span class="hint">No bids</span>'
+        : mine(a) && !reserveMissed ? `<span class="diff-good">🏆 You won</span>${avg ? `<br><small class="hint">${money(Math.abs(avg - bid))} ${bid <= avg ? 'under' : 'over'} market</small>` : ''}`
         : reserveMissed ? `<span class="diff-bad">Reserve ${money(a.reserve)} not met</span>`
         : !avg ? '<span class="hint">Sold · no market price</span>'
         : `<span class="${bid <= avg ? 'diff-good' : 'diff-bad'}">Sold ${money(Math.abs(avg - bid))} ${bid <= avg ? 'under' : 'over'} (${Math.round(Math.abs(avg - bid) / avg * 100)}%)</span>`;
@@ -1065,6 +1071,17 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         await saveSetting({ ebayApp: { id, secret } }); showKeys({ id, secret }); photoIdQueue();
       });
       $('ebayKeysOff').addEventListener('click', async () => { await saveSetting({ ebayApp: null }); showKeys(null); });
+      const showMe = st => {
+        myName = (st && (st.myName || st.myNameAuto)) || '';
+        $('meToggle').hidden = false;
+        $('meToggle').textContent = myName ? `You: ${myName}` : 'Your Facebook name';
+        $('meName').placeholder = (st && st.myNameAuto) || 'Your name as it shows on Facebook';
+        render();
+      };
+      chrome.storage.local.get('settings').then(({ settings }) => showMe(settings));
+      chrome.storage.onChanged.addListener(ch => { if (ch.settings) showMe(ch.settings.newValue); });
+      $('meToggle').addEventListener('click', () => { $('meBox').hidden = !$('meBox').hidden; $('meName').value = myName; });
+      $('meForm').addEventListener('submit', async e => { e.preventDefault(); await saveSetting({ myName: $('meName').value.trim() || null }); $('meBox').hidden = true; });
       $('sweepMinutes').addEventListener('change', e => saveSetting({ sweepMinutes: Number(e.target.value) }));
       const showScan = r => {
         const n = (k, w) => `${r[k]} ${w}${r[k] === 1 ? '' : 's'}`;
