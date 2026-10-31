@@ -225,12 +225,17 @@ async function fetchPhotos(id) {
 // and fills in the first time you open it or press Update.
 async function trackSaved(posts) {
   const report = { at: new Date().toISOString(), saved: posts.length, tracked: 0, unread: 0 };
+  // "pfbid…" links are remembered once read (or tried), so the Saved page doesn't fetch them again and again.
+  const ids = (await chrome.storage.local.get('savedIds')).savedIds || {};
   for (const s of posts) {
-    if (!/^\d+$/.test(s.id)) continue;
+    if (!/^(\d+|pfbid\w+)$/.test(s.id)) continue;
+    if (/^pfbid/.test(s.id) && ids[s.id] && (ids[s.id] !== 'unread' || s.background)) continue;
     const before = await getAuction(s.id);
     if (before && (before.dismissed || before.tracked !== false)) continue; // already tracked, or you removed it
-    await silentCheck(s.url, s.groupId, s.id, s.background ? 'auction' : true);
-    const now = await getAuction(s.id);
+    const key = await silentCheck(s.url, s.groupId, s.id, s.background ? 'auction' : true);
+    const now = await getAuction(key || s.id);
+    if (/^pfbid/.test(s.id)) { ids[s.id] = key || 'unread'; await chrome.storage.local.set({ savedIds: ids }); }
+    if (/^pfbid/.test(s.id) && !key) { report.unread++; continue; } // a pfbid link that couldn't be read: no number to track it by yet
     if (now && now.tracked !== false && !now.dismissed) report.tracked++;
     else if (s.background) continue; // found in the background but unreadable: wait until you open it
     else {
@@ -255,7 +260,7 @@ async function pollSaved() {
     const html = (await res.text()).replace(/\\\//g, '/');
     if (FbJson.loggedOut(html)) return;
     const seen = new Map();
-    for (const m of html.matchAll(/https:\/\/www\.facebook\.com\/groups\/([^/"?\\]+)\/(?:posts|permalink)\/(\d+)/g))
+    for (const m of html.matchAll(/https:\/\/www\.facebook\.com\/groups\/([^/"?\\]+)\/(?:posts|permalink)\/(\d+|pfbid\w+)/g))
       if (!seen.has(m[2])) seen.set(m[2], { id: m[2], groupId: m[1], url: `https://www.facebook.com/groups/${m[1]}/posts/${m[2]}/`, background: true });
     await chrome.storage.local.set({ lastSavedPoll: { at: new Date().toISOString(), found: seen.size, status: res.status } });
     if (seen.size) await trackSaved([...seen.values()].slice(0, 20));
@@ -273,10 +278,11 @@ async function silentCheck(url, groupId, targetId, track) {
     const posts = FbJson.extractPosts(html);
     report.posts = posts.length;
     // When checking one tracked auction, make sure the reading lands on that card even if Facebook's ids differ.
-    const target = targetId && (posts.find(p => p.key === targetId) || (!track && posts.find(p => AUCTION_RE.test(p.text))));
+    // A "pfbid…" link has no post number: its own page shows that post first.
+    const target = targetId && (posts.find(p => p.key === targetId) || (/^pfbid/.test(targetId) && posts[0]) || (!track && posts.find(p => AUCTION_RE.test(p.text))));
     if (track && !target) return;
     if (track === 'auction' && !AUCTION_RE.test(target.text)) return; // found in the background: auctions only
-    if (target) target.key = targetId;
+    if (target && /^\d+$/.test(targetId)) target.key = targetId;
     report.comments = 0;
     for (const p of target ? [target] : posts) { // checking one auction: ignore the other posts on that page
       if (!target && !AUCTION_RE.test(p.text)) continue;
@@ -288,6 +294,7 @@ async function silentCheck(url, groupId, targetId, track) {
         seller: p.seller, image: p.image, images: p.images, text: p.text, comments: p.comments, seenAt: report.at, source: 'background',
       }, null, track || undefined);
     }
+    return target ? target.key : null;
   } catch (e) {
     report.error = e.message;
   } finally {

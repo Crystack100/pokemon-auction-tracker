@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.23.1';
+  const SITE_VERSION = '0.24.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -1083,6 +1083,18 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           : `Last update ${ago(r.at)}${r.comments != null ? ` · read ${r.comments} comment${r.comments === 1 ? '' : 's'}` : ''}`;
       };
       chrome.storage.local.get('lastScan').then(r => showScan(r.lastScan));
+      // Saved folder: what the extension saw the last time you opened facebook.com/saved, and what it tracked.
+      const showSaved = (page, done) => {
+        const el = $('savedStatus');
+        if (!page && !done) { el.innerHTML = 'Saved folder: open <a href="https://www.facebook.com/saved/" target="_blank" rel="noopener">facebook.com/saved</a> once and the auction posts you saved are tracked.'; return; }
+        const parts = [];
+        if (page) parts.push(`Saved folder opened ${ago(page.at)}: ${page.found} group post${page.found === 1 ? '' : 's'} found${page.auto ? '' : ' (tracking off for that folder)'}`);
+        if (done) parts.push(`${done.tracked} tracked${done.unread ? `, ${done.unread} couldn't be read yet` : ''} (${ago(done.at)})`);
+        el.innerHTML = esc(parts.join(' · ')) + (page && !page.found ? ' · <button type="button" id="savedReport">Copy report for fixing</button>' : '');
+        if ($('savedReport')) $('savedReport').onclick = () => chrome.storage.local.set({ debugDump: { savedPage: page, lastSaved: done || null } });
+      };
+      chrome.storage.local.get(['savedPage', 'lastSaved']).then(r => showSaved(r.savedPage, r.lastSaved));
+      chrome.storage.onChanged.addListener(ch => { if (ch.savedPage || ch.lastSaved) chrome.storage.local.get(['savedPage', 'lastSaved']).then(r => showSaved(r.savedPage, r.lastSaved)); });
       const showGroups = groups => {
         const list = Object.values(groups || {});
         $('watch').hidden = true; // auctions are now picked with the Track button on Facebook

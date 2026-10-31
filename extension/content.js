@@ -381,11 +381,12 @@
      the box turns that off for the folder. Nothing is clicked: the posts are read in the background. */
   function savedPosts() {
     const out = new Map();
-    for (const a of document.querySelectorAll('[role="main"] a[href]')) {
+    for (const a of document.querySelectorAll('[role="main"] a[href], a[href*="/groups/"]')) {
       const h = a.href;
-      let m = h.match(/\/groups\/([^/?#]+)\/(?:posts|permalink)\/(\d+)/);
+      // Post ids are numbers or Facebook's newer "pfbid…" codes.
+      let m = h.match(/\/groups\/([^/?#]+)\/(?:posts|permalink)\/(\d+|pfbid\w+)/);
       const url = m ? `https://www.facebook.com/groups/${m[1]}/posts/${m[2]}/` : null;
-      if (!m) { const mm = h.match(/multi_permalinks=(\d+)/) || h.match(/[?&]story_fbid=(\d+)/); if (mm) m = [null, null, mm[1]]; }
+      if (!m) { const mm = h.match(/multi_permalinks=(\d+)/) || h.match(/[?&]story_fbid=(\d+|pfbid\w+)/); if (mm) m = [null, null, mm[1]]; }
       if (!m || out.has(m[2])) continue;
       // The saved item around the link: climb while it still holds only this one post.
       const POSTLINK = 'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="multi_permalinks"]';
@@ -401,7 +402,7 @@
     const list = savedPosts();
     const st = await chrome.storage.local.get(null);
     const auto = !((st.settings || {}).savedOff || []).includes(folder);
-    const fresh = list.filter(p => { const a = st['auction:' + p.id]; return !a || (a.tracked === false && !a.dismissed); });
+    const fresh = list.filter(p => { const a = st['auction:' + ((st.savedIds || {})[p.id] || p.id)]; return !(st.savedIds || {})[p.id] && (!a || (a.tracked === false && !a.dismissed)); });
     let bar = document.getElementById('pat-saved');
     if (!bar) {
       bar = document.createElement('div');
@@ -424,7 +425,15 @@
       ? `<span>✓ Saved posts here are tracked automatically${list.length ? ` (${list.length})` : ''}.</span><button data-act="stop" style="${btn};background:#59607a;color:#fff">Stop</button>`
       : `<span>Not tracking this folder.</span><button data-act="track" style="${btn};background:#1e8e4a;color:#fff">Track it</button>`;
     if (auto && fresh.length && !savedBusy) trackSaved(fresh);
+    // What this Saved page showed, so the tracker can show it (and so it can be fixed if posts are missed).
+    clearTimeout(savedReportTimer);
+    savedReportTimer = setTimeout(() => {
+      const links = [...document.querySelectorAll('[role="main"] a[href]')].map(a => a.href.split('?')[0]).filter(h => /facebook\.com\/(?!saved|photo|hashtag)/.test(h));
+      chrome.storage.local.set({ savedPage: { at: new Date().toISOString(), version: chrome.runtime.getManifest().version, folder, found: savedPosts().length, auto,
+        links: [...new Set(links)].slice(0, 40) } }).catch(() => {});
+    }, 4000);
   }
+  let savedReportTimer = null;
   function trackSaved(list) {
     if (!list.length) return;
     savedBusy = true;
