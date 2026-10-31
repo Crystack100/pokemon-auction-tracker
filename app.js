@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.26.1';
+  const SITE_VERSION = '0.26.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -846,11 +846,14 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     const now = Date.now();
     let list = auctions.filter(isTracked);
     if (filter === 'live') list = list.filter(a => !endOf(a) || new Date(endOf(a)) > now);
-    if (filter === 'under') list = list.filter(a => { const m = marketPrice(a), b = a.currentBid ?? a.startBid ?? 0; return m && b < m; });
+    // Under market: live auctions only, whose bid is under the market price.
+    if (filter === 'under') list = list.filter(a => { const m = marketPrice(a), b = a.currentBid ?? a.startBid ?? 0; return m && b < m && (!endOf(a) || new Date(endOf(a)) > now); });
     const endKey = a => endOf(a) ? (new Date(endOf(a)) < now ? 9e15 + +new Date(endOf(a)) : +new Date(endOf(a))) : 8e15;
     if (sort === 'ends') list.sort((a, b) => endKey(a) - endKey(b));
     if (sort === 'deal') list.sort((a, b) => (verdict(a).ratio ?? 9) - (verdict(b).ratio ?? 9));
     if (sort === 'added') list.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+    // ...ordered from the smallest discount to the biggest.
+    if (filter === 'under') list.sort((a, b) => (verdict(b).ratio ?? 0) - (verdict(a).ratio ?? 0));
     $('count').textContent = `(${list.length})`;
     $('grid').innerHTML = list.length ? list.map(renderCard).join('') :
       `<div class="empty">${auctions.some(isTracked) ? 'Nothing matches this filter.' : inExtension ? 'Nothing tracked yet. Open your auction group on Facebook and press "+ Track this auction" on any auction post.' : 'No auctions yet. Paste a post above and press Add to tracker.'}</div>`;
