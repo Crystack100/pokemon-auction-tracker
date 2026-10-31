@@ -153,9 +153,13 @@
 
   // Every photo in the post itself (not in comments or profile pictures), in the post's order.
   const PHOTO_LINK = /\/photo(\.php)?\/?\?|\/photos\/|[?&]set=(pcb|gm|a)\./;
-  function postImages(post) {
+  // Photos in a post link to "…set=pcb.<post id>" (or gm.<post id>). A photo whose link names another
+  // post's id belongs to that post (Facebook can lay a neighbouring post inside the same box), so it's left out;
+  // when some photos link to this post, only those are kept.
+  function postImages(post, postId) {
     const seen = new Set();
     const list = [];
+    const own = [];
     for (const img of post.querySelectorAll('img, image')) {
       if (img.closest('[aria-label^="Comment by"], [aria-label^="Reply by"], .pat-bar')) continue;
       const src = img.tagName === 'IMG' ? (img.currentSrc || img.src) : (img.getAttribute('href') || img.getAttribute('xlink:href') || '');
@@ -171,10 +175,14 @@
       if (!inPhotoLink && (w < 100 || h < 100)) continue; // profile pictures and icons
       const id = src.split('?')[0];
       if (seen.has(id)) continue;
+      const set = (link.match(/[?&]set=(?:pcb|gm)\.(\d+)/) || [])[1];
+      if (postId && set && set !== postId) continue; // another post's photo
       seen.add(id);
       list.push(src);
+      if (postId && set === postId) own.push(src);
     }
-    return list.slice(0, 20);
+    postImages.verified = own.length > 0;
+    return (own.length ? own : list).slice(0, 20);
   }
   // The post's photo album (Facebook only shows up to 5 photos with a "+3" tile for the rest).
   function photoSet(post) {
@@ -199,14 +207,16 @@
   }
 
   function snapshot(post) {
-    const images = postImages(post);
     const text = postText(post);
     const link = postLink(post);
+    const images = postImages(post, link && /^\d+$/.test(link.id) ? link.id : null);
+    const imagesVerified = postImages.verified;
     return {
       key: link ? link.id : textKey(text),
       postUrl: link ? link.url : null,
       seller: author(post),
       images,
+      imagesVerified,
       text,
       image: images[0] || null,
       photoSet: photoSet(post),
