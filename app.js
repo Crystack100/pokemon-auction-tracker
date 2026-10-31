@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.21.4';
+  const SITE_VERSION = '0.22.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -169,12 +169,25 @@ function countdownText(iso) {
   // A price typed in by hand wins over the automatic eBay lookup.
   // Market value: a value you typed in Fix details wins; then the eBay AU average of recent sales;
   // then PriceCharting (in AUD) when there's no eBay average. Times the quantity.
-  const marketPrice = a => {
-    if (a.ebaySold != null) return a.ebaySold;
+  // Which one comes first is your choice ("Market price from"); the other is used when the first has no price.
+  let priceSource = 'ebay';
+  try { priceSource = localStorage.getItem('pat-price-source') || 'ebay'; } catch {}
+  const marketSource = a => {
+    if (a.ebaySold != null) return 'typed';
     if (a.wholeLot) return null;
-    const m = ebayMarket(a); if (m) return m.average * qtyOf(a);
-    const pc = pcPrice(a); return pc ? pc.aud * qtyOf(a) : null;
+    const has = { ebay: !!ebayMarket(a), pc: !!pcPrice(a) };
+    const other = priceSource === 'pc' ? 'ebay' : 'pc';
+    return has[priceSource] ? priceSource : has[other] ? other : null;
   };
+  const marketPrice = a => {
+    const src = marketSource(a);
+    if (src === 'typed') return a.ebaySold;
+    if (src === 'ebay') return ebayMarket(a).average * qtyOf(a);
+    if (src === 'pc') return pcPrice(a).aud * qtyOf(a);
+    return null;
+  };
+  // Google Lens with the auction's photo: finds the exact card or product when the title isn't enough.
+  const lensUrl = u => `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(u)}`;
   const qtyOf = a => (a.qty > 1 ? a.qty : 1);
 
   // eBay AU average, worked out from the sales the extension saved (with their sold dates):
@@ -517,7 +530,7 @@ function countdownText(iso) {
     const q = qtyOf(a);
     const all = Object.entries(pc.prices).map(([l, v]) => `${esc(l)} US${money(v)}`).join(' · ');
     if (!p) return `<span class="hint">PriceCharting has no ${esc(a.grade || 'ungraded')} price for <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}</a>. ${all}</span>`;
-    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${ebayMarket(a) ? ' (for comparison; the eBay AU average is used)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
+    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${marketSource(a) === 'ebay' ? ' (for comparison; the eBay AU average is used)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
       <details class="how"><summary>How this was worked out</summary><p class="hint">Matched <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}${pc.set ? ' (' + esc(pc.set) + ')' : ''}</a> on PriceCharting, searched as "${esc(pc.query)}". Its ${esc(p.label)} price is US${money(p.usd)}, which is ${money(p.aud)} at ${esc(audRateNote || `US$1 = A$${p.rate.toFixed(2)}`)}.${q > 1 ? ` This lot has ${q} items, so ${money(p.aud)} × ${q} = ${money(p.aud * q)}.` : ''} PriceCharting's price is its average of recent sold listings for that exact product and grade. Checked ${esc(ago(pc.checkedAt))}.</p><p class="hint">All its prices: ${all}</p></details>`;
   }
   function renderCard(a) {
@@ -571,7 +584,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.wholeLot && a.ebaySold == null ? `<span class="hint">A whole lot with no single card named, so there's no eBay or PriceCharting price to compare. Type a market value in Fix details if you have one.</span>` : ''}
           ${a.wholeLot ? '' : ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
           ${a.wholeLot ? '' : pcExplain(a)}
-          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot ? [] : marketLinks(a)).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
+          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot ? [] : marketLinks(a)).concat(photos(a)[0] && /^https?:/.test(photos(a)[0]) ? [['Image search', lensUrl(photos(a)[0])]] : []).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         <details>
           <summary>Fix details</summary>
@@ -828,6 +841,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       $('trackingSection').hidden = view !== 'tracking';
     }));
     $('sort').addEventListener('change', render);
+    $('priceSource').value = priceSource;
+    $('priceSource').addEventListener('change', e => { priceSource = e.target.value; try { localStorage.setItem('pat-price-source', priceSource); } catch {} render(); });
 
     const pick = () => $('file').click();
     $('drop').addEventListener('click', pick);
@@ -853,7 +868,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     });
 
     let lb = { pics: [], i: 0 };
-    const showLb = () => { $('lbImg').src = lb.pics[lb.i]; $('lbCount').textContent = `${lb.i + 1} of ${lb.pics.length}`; $('lbPrev').hidden = $('lbNext').hidden = lb.pics.length < 2; };
+    const showLb = () => { $('lbImg').src = lb.pics[lb.i]; $('lbLens').hidden = !/^https?:/.test(lb.pics[lb.i] || ''); $('lbLens').href = lensUrl(lb.pics[lb.i] || ''); $('lbCount').textContent = `${lb.i + 1} of ${lb.pics.length}`; $('lbPrev').hidden = $('lbNext').hidden = lb.pics.length < 2; };
     const photoNote = a => {
       const l = a.photoLog || {}, n = x => x ? (x.error ? 'error' : x.found) : '–';
       return `v${chrome.runtime.getManifest().version} · Photos found · Facebook page: ${n(l.facebook)} · background: ${n(l.background)} · album: ${n(l.album)}${l.album && l.album.status ? ` (${l.album.status}, ${Math.round((l.album.size || 0) / 1024)}KB)` : ''}`;
@@ -882,7 +897,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (!lb.pics.length) { $('lightbox').hidden = true; return; }
       lb.i = Math.min(lb.i, lb.pics.length - 1); showLb(); $('lbRemove').hidden = lb.pics.length < 2;
     });
-    $('lightbox').addEventListener('click', e => { if (e.target.id !== 'lbImg') $('lightbox').hidden = true; });
+    $('lightbox').addEventListener('click', e => { if (e.target.id !== 'lbImg' && e.target.id !== 'lbLens') $('lightbox').hidden = true; });
     document.addEventListener('keydown', e => {
       if ($('lightbox').hidden) return;
       if (e.key === 'Escape') $('lightbox').hidden = true; else if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
