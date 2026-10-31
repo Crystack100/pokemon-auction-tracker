@@ -198,9 +198,23 @@ ol.sales li.dropped { text-decoration: line-through; }
     </div>
     <div class="row">
       <button type="button" id="benchToggle" hidden>Add one by hand</button>
+      <button type="button" id="readerToggle" hidden>Card reader</button>
       <span class="status" id="storeStatus">Saved on this device</span>
     </div>
   </header>
+
+  <section class="watch" id="readerBox" hidden aria-labelledby="readerTitle">
+    <div class="watch-text">
+      <strong id="readerTitle">Card reader</strong>
+      <span class="hint">Reads each auction's photos with Claude to get the full card name, set, number and slab grade, then searches eBay and PriceCharting with that. Uses your own Anthropic API key (console.anthropic.com → API keys), saved only in this browser. Each auction is read once, about 2–3 US cents. A title you type in Fix details always wins.</span>
+      <span class="hint" id="readerStatus" aria-live="polite"></span>
+    </div>
+    <form class="row" id="readerForm">
+      <input id="readerKey" type="password" autocomplete="off" aria-label="Anthropic API key" style="width:min(260px,100%)">
+      <button type="submit" class="primary">Save key</button>
+      <button type="button" id="readerOff" hidden>Turn off</button>
+    </form>
+  </section>
 
   <section class="watch" id="watch" hidden aria-label="Groups being watched">
     <div class="watch-text">
