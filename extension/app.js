@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.22.1';
+  const SITE_VERSION = '0.22.2';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -519,7 +519,7 @@ function countdownText(iso) {
   function pcExplain(a) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
-    if (pc.status !== 'ok' && ebayMarket(a)) return '';
+    if (pc.status !== 'ok' && ebayMarket(a) && a.priceSource !== 'pc') return '';
     if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">PriceCharting doesn't allow automatic checks. Press "PriceCharting ↗" below once and its price is saved here.</span>`;
     if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here. If PriceCharting doesn't have it, the eBay AU average is used.</span>`;
     if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
@@ -528,7 +528,7 @@ function countdownText(iso) {
     const q = qtyOf(a);
     const all = Object.entries(pc.prices).map(([l, v]) => `${esc(l)} US${money(v)}`).join(' · ');
     if (!p) return `<span class="hint">PriceCharting has no ${esc(a.grade || 'ungraded')} price for <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}</a>. ${all}</span>`;
-    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${marketSource(a) === 'ebay' ? ' (for comparison; this card uses eBay)' : ''}${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
+    return `<span class="hint">PriceCharting <strong>${money(p.aud)}</strong>${q > 1 ? ` × ${q} = <strong>${money(p.aud * q)}</strong>` : ''} · ${esc(p.label)}</span>
       <details class="how"><summary>How this was worked out</summary><p class="hint">Matched <a href="${esc(pc.url)}" target="_blank" rel="noopener">${esc(pc.name)}${pc.set ? ' (' + esc(pc.set) + ')' : ''}</a> on PriceCharting, searched as "${esc(pc.query)}". Its ${esc(p.label)} price is US${money(p.usd)}, which is ${money(p.aud)} at ${esc(audRateNote || `US$1 = A$${p.rate.toFixed(2)}`)}.${q > 1 ? ` This lot has ${q} items, so ${money(p.aud)} × ${q} = ${money(p.aud * q)}.` : ''} PriceCharting's price is its average of recent sold listings for that exact product and grade. Checked ${esc(ago(pc.checkedAt))}.</p><p class="hint">All its prices: ${all}</p></details>`;
   }
   function renderCard(a) {
@@ -580,10 +580,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
           ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
-          ${a.priceSource === 'pc' && !a.wholeLot && a.ebaySold == null && !pcPrice(a) ? '<span class="hint">No PriceCharting price for this card yet. Press "PriceCharting ↗" below and pick the product.</span>' : ''}
           ${a.wholeLot && a.ebaySold == null ? `<span class="hint">A whole lot with no single card named, so there's no eBay or PriceCharting price to compare. Type a market value in Fix details if you have one.</span>` : ''}
-          ${a.wholeLot ? '' : ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
-          ${a.wholeLot ? '' : pcExplain(a)}
+          ${a.wholeLot ? '' : a.priceSource === 'pc' ? pcExplain(a) : `${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}${ebayMarket(a) ? '' : pcExplain(a)}`}
           <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot ? [] : marketLinks(a)).concat(photos(a)[0] && /^https?:/.test(photos(a)[0]) ? [['Image search', lensUrl(photos(a)[0])]] : []).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         <details>
