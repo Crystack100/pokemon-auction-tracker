@@ -302,11 +302,46 @@ async function silentCheck(url, groupId, targetId, track) {
   }
 }
 
+/* ---------- eBay image search ----------
+   Names a card from its photo with eBay's official image search (Browse API, search_by_image), using the
+   eBay developer keys you saved on the tracker page. Returns the titles of the closest eBay AU listings. */
+let ebayToken = null;
+async function ebayAppToken() {
+  if (ebayToken && ebayToken.until > Date.now() + 60e3) return ebayToken.value;
+  const app = (await settings()).ebayApp;
+  if (!app || !app.id || !app.secret) throw new Error('no-keys');
+  const res = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: 'Basic ' + btoa(app.id + ':' + app.secret) },
+    body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.access_token) throw new Error('eBay refused the keys (' + (j.error_description || j.error || res.status) + ')');
+  ebayToken = { value: j.access_token, until: Date.now() + (j.expires_in || 7200) * 1000 };
+  return ebayToken.value;
+}
+async function ebayImageSearch(imageUrl) {
+  const u = new URL(imageUrl);
+  if (u.protocol !== 'https:' || !/(^|\.)fbcdn\.net$/.test(u.hostname)) throw new Error('not allowed');
+  const token = await ebayAppToken();
+  const bytes = new Uint8Array(await (await fetch(u.href, { credentials: 'omit' })).arrayBuffer());
+  let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const res = await fetch('https://api.ebay.com/buy/browse/v1/item_summary/search_by_image?limit=30', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token, 'x-ebay-c-marketplace-id': 'EBAY_AU' },
+    body: JSON.stringify({ image: btoa(bin) }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error('eBay image search: ' + ((j.errors && j.errors[0] && j.errors[0].message) || res.status));
+  return { titles: (j.itemSummaries || []).map(i => i.title).filter(Boolean) };
+}
+
 /* ---------- wiring ---------- */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // The tracker page reads PriceCharting prices through here (that site doesn't let other pages read it).
   // Only PriceCharting pages, read as a normal visit without your cookies.
   if (msg.type === 'pc-fetch') {
+    if (msg.url && typeof msg.url === 'object' && msg.url.ebayImage) { ebayImageSearch(msg.url.ebayImage).then(sendResponse, e => sendResponse({ error: String(e.message || e) })); return true; }
     let u = null; try { u = new URL(msg.url); } catch {}
     // Also: the Pokémon TCG card list (to name a card from the number on its photo), and Facebook's
     // photo files (to read the text on the card), returned as image data.

@@ -198,10 +198,25 @@ ol.sales li.dropped { text-decoration: line-through; }
     </div>
     <div class="row">
       <button type="button" id="benchToggle" hidden>Add one by hand</button>
+      <button type="button" id="imgSearchToggle" hidden>eBay image search</button>
       <span class="status" id="storeStatus">Saved on this device</span>
       <span class="status" id="savedStatus"></span>
     </div>
   </header>
+
+  <section class="watch" id="imgSearchBox" hidden aria-labelledby="imgSearchTitle">
+    <div class="watch-text">
+      <strong id="imgSearchTitle">eBay image search</strong>
+      <span class="hint">Searches each auction's first photo on eBay (eBay's own image search) and reads the card's name, set and number from the listings that match. Needs your eBay developer keys: developer.ebay.com → Application Keys → Production → App ID (Client ID) and Cert ID (Client Secret). They're saved only in this browser.</span>
+      <span class="hint" id="imgSearchStatus" aria-live="polite"></span>
+    </div>
+    <form class="row" id="imgSearchForm">
+      <input id="ebayId" type="password" autocomplete="off" aria-label="eBay Client ID" style="width:min(220px,100%)">
+      <input id="ebaySecret" type="password" autocomplete="off" aria-label="eBay Client Secret" style="width:min(220px,100%)">
+      <button type="submit" class="primary">Save keys</button>
+      <button type="button" id="ebayKeysOff" hidden>Turn off</button>
+    </form>
+  </section>
 
   <section class="watch" id="watch" hidden aria-label="Groups being watched">
     <div class="watch-text">

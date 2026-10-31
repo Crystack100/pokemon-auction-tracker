@@ -84,6 +84,24 @@ window.PhotoId = (() => {
   }
   async function titlePokemon(title) { return pokemonIn(title || ''); }
 
+  // From the titles of the eBay listings that look most like the photo (eBay image search): the card number
+  // and Pokémon most of them agree on, then the exact card from the card list.
+  async function fromTitles(titles, fetchJson, title) {
+    const top = (list) => { const c = new Map(); list.filter(Boolean).forEach(k => c.set(k, (c.get(k) || 0) + 1)); return [...c.entries()].sort((a, b) => b[1] - a[1])[0] || null; };
+    const nums = titles.map(t => numbersIn(t)[0]).filter(Boolean);
+    const num = top(nums.map(n => n.n + '/' + n.total));
+    const mons = []; for (const t of titles.slice(0, 15)) mons.push(await pokemonIn(t));
+    const mon = top(mons);
+    const rar = top(titles.map(t => (RARITIES.find(([re]) => re.test(t)) || [])[1]));
+    const pokemon = (mon && mon[0]) || await titlePokemon(title);
+    let found = null;
+    if (num && (num[1] >= 2 || titles.length === 1)) { const [n, total] = num[0].split('/'); found = await lookup(pokemon, [{ n, total }], fetchJson, title) || await lookup(null, [{ n, total }], fetchJson, pokemon || title); }
+    if (!found && pokemon && rar) found = await byName(pokemon, rar[0], titles.join(' '), fetchJson);
+    const sample = titles.slice(0, 3);
+    if (found) return { ...found, source: 'ebay', distinct: 1, titles: sample };
+    return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
+  }
+
   async function identify(dataUrls, fetchJson, title) {
     let text = '', pokemon = null, nums = [];
     for (const d of dataUrls) {
@@ -98,5 +116,5 @@ window.PhotoId = (() => {
     if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon ? { status: 'partial', pokemon, distinct: nums.length, text: excerpt } : { status: 'none', text: excerpt };
   }
-  return { identify, numbersIn, pokemonIn };
+  return { identify, fromTitles, numbersIn, pokemonIn };
 })();
