@@ -376,9 +376,9 @@
   }
 
   /* ---------- Saved folder ----------
-     On your Facebook Saved page (or one of its collections), lists the group posts saved there.
-     Press "Track all" once and they're all tracked; after that, opening the same folder tracks
-     anything new you saved to it. Nothing is clicked: the posts are read in the background. */
+     Posts you save on Facebook are tracked automatically (the extension also checks your Saved
+     list in the background). Opening a Saved folder tracks anything in it straight away; "Stop" in
+     the box turns that off for the folder. Nothing is clicked: the posts are read in the background. */
   function savedPosts() {
     const out = new Map();
     for (const a of document.querySelectorAll('[role="main"] a[href]')) {
@@ -400,8 +400,8 @@
     const folder = new URLSearchParams(location.search).get('list_id') || 'all';
     const list = savedPosts();
     const st = await chrome.storage.local.get(null);
-    const auto = ((st.settings || {}).savedFolders || []).includes(folder);
-    const fresh = list.filter(p => { const a = st['auction:' + p.id]; return !a || a.tracked === false || a.dismissed; });
+    const auto = !((st.settings || {}).savedOff || []).includes(folder);
+    const fresh = list.filter(p => { const a = st['auction:' + p.id]; return !a || (a.tracked === false && !a.dismissed); });
     let bar = document.getElementById('pat-saved');
     if (!bar) {
       bar = document.createElement('div');
@@ -411,9 +411,9 @@
         const act = e.target.dataset && e.target.dataset.act;
         if (!act) return;
         const s = (await chrome.storage.local.get('settings')).settings || {};
-        const folders = new Set(s.savedFolders || []);
-        if (act === 'track') folders.add(folder); else folders.delete(folder);
-        await chrome.storage.local.set({ settings: { ...s, savedFolders: [...folders] } });
+        const off = new Set(s.savedOff || []);
+        if (act === 'track') off.delete(folder); else off.add(folder);
+        await chrome.storage.local.set({ settings: { ...s, savedOff: [...off] } });
         if (act === 'track') trackSaved(savedPosts());
         savedScan();
       });
@@ -421,8 +421,8 @@
     }
     const btn = 'border:0;border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer';
     bar.innerHTML = auto
-      ? `<span>✓ Tracking this folder: posts you save here are tracked when you open it.</span><button data-act="stop" style="${btn};background:#59607a;color:#fff">Stop</button>`
-      : `<span>${list.length ? `${list.length} saved post${list.length === 1 ? '' : 's'} here.` : 'No group posts found here yet.'}</span>${list.length ? `<button data-act="track" style="${btn};background:#1e8e4a;color:#fff">Track all${fresh.length < list.length ? ` (${fresh.length} new)` : ''}</button>` : ''}`;
+      ? `<span>✓ Saved posts here are tracked automatically${list.length ? ` (${list.length})` : ''}.</span><button data-act="stop" style="${btn};background:#59607a;color:#fff">Stop</button>`
+      : `<span>Not tracking this folder.</span><button data-act="track" style="${btn};background:#1e8e4a;color:#fff">Track it</button>`;
     if (auto && fresh.length && !savedBusy) trackSaved(fresh);
   }
   function trackSaved(list) {

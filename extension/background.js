@@ -228,10 +228,11 @@ async function trackSaved(posts) {
   for (const s of posts) {
     if (!/^\d+$/.test(s.id)) continue;
     const before = await getAuction(s.id);
-    if (before && before.tracked !== false && !before.dismissed) continue;
-    await silentCheck(s.url, s.groupId, s.id, true);
+    if (before && (before.dismissed || before.tracked !== false)) continue; // already tracked, or you removed it
+    await silentCheck(s.url, s.groupId, s.id, s.background ? 'auction' : true);
     const now = await getAuction(s.id);
     if (now && now.tracked !== false && !now.dismissed) report.tracked++;
+    else if (s.background) continue; // found in the background but unreadable: wait until you open it
     else {
       await putAuction({ ...(before || {}), id: s.id, source: 'facebook', postUrl: s.url, addedAt: (before && before.addedAt) || report.at,
         raw: (before && before.raw) || s.text, tracked: true, dismissed: false, fromSaved: true });
@@ -240,6 +241,27 @@ async function trackSaved(posts) {
     await new Promise(r => setTimeout(r, 1500));
   }
   await chrome.storage.local.set({ lastSaved: report });
+}
+
+// Your Facebook Saved list, read in the background every 10 minutes (no tab): any group post saved
+// there that looks like an auction is tracked. Facebook builds that page mostly in the browser, so
+// this may find nothing; opening a Saved folder yourself always works.
+async function pollSaved() {
+  const s = await settings();
+  if (s.savedPoll === false || Date.now() - new Date(s.lastSavedPoll || 0) < 10 * 60e3) return;
+  await chrome.storage.local.set({ settings: { ...s, lastSavedPoll: new Date().toISOString() } });
+  try {
+    const res = await fetch('https://www.facebook.com/saved/', { credentials: 'include', headers: { accept: 'text/html' } });
+    const html = (await res.text()).replace(/\\\//g, '/');
+    if (FbJson.loggedOut(html)) return;
+    const seen = new Map();
+    for (const m of html.matchAll(/https:\/\/www\.facebook\.com\/groups\/([^/"?\\]+)\/(?:posts|permalink)\/(\d+)/g))
+      if (!seen.has(m[2])) seen.set(m[2], { id: m[2], groupId: m[1], url: `https://www.facebook.com/groups/${m[1]}/posts/${m[2]}/`, background: true });
+    await chrome.storage.local.set({ lastSavedPoll: { at: new Date().toISOString(), found: seen.size, status: res.status } });
+    if (seen.size) await trackSaved([...seen.values()].slice(0, 20));
+  } catch (e) {
+    await chrome.storage.local.set({ lastSavedPoll: { at: new Date().toISOString(), error: e.message } });
+  }
 }
 
 async function silentCheck(url, groupId, targetId, track) {
@@ -253,6 +275,7 @@ async function silentCheck(url, groupId, targetId, track) {
     // When checking one tracked auction, make sure the reading lands on that card even if Facebook's ids differ.
     const target = targetId && (posts.find(p => p.key === targetId) || (!track && posts.find(p => AUCTION_RE.test(p.text))));
     if (track && !target) return;
+    if (track === 'auction' && !AUCTION_RE.test(target.text)) return; // found in the background: auctions only
     if (target) target.key = targetId;
     report.comments = 0;
     for (const p of target ? [target] : posts) { // checking one auction: ignore the other posts on that page
@@ -347,7 +370,7 @@ async function autoUpdate() {
 }
 // Create the timer once; re-creating it every time the extension wakes up would keep pushing it back.
 chrome.alarms.get('auto-update', al => { if (!al) chrome.alarms.create('auto-update', { periodInMinutes: 1 }); });
-chrome.alarms.onAlarm.addListener(al => { if (al.name === 'auto-update') autoUpdate(); });
+chrome.alarms.onAlarm.addListener(al => { if (al.name === 'auto-update') { autoUpdate(); pollSaved(); } });
 chrome.action.onClicked.addListener(async () => {
   const url = TRACKER_URL;
   const [tab] = await chrome.tabs.query({ url: TRACKER_URL + '*' });
