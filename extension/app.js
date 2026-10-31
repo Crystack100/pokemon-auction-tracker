@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.21.3';
+  const SITE_VERSION = '0.21.4';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -171,6 +171,7 @@ function countdownText(iso) {
   // then PriceCharting (in AUD) when there's no eBay average. Times the quantity.
   const marketPrice = a => {
     if (a.ebaySold != null) return a.ebaySold;
+    if (a.wholeLot) return null;
     const m = ebayMarket(a); if (m) return m.average * qtyOf(a);
     const pc = pcPrice(a); return pc ? pc.aud * qtyOf(a) : null;
   };
@@ -499,7 +500,7 @@ function countdownText(iso) {
     try {
       if (!audPerUsd) await loadRate();
       // Prices read from a page you opened, or checks PriceCharting refused, wait until the search words change.
-      const due = auctions.filter(a => isTracked(a) && !a.example && (!a.pc || a.pc.query !== pcQuery(a) ||
+      const due = auctions.filter(a => isTracked(a) && !a.example && !a.wholeLot && (!a.pc || a.pc.query !== pcQuery(a) ||
         (a.pc.source !== 'page' && a.pc.status !== 'blocked' && !/ 403$/.test(a.pc.error || '') && Date.now() - Date.parse(a.pc.checkedAt) > 12 * 3600e3)));
       for (const a of due) { await pcLookup(a); await new Promise(r => setTimeout(r, 1500)); }
     } finally { pcRunning = false; }
@@ -567,9 +568,10 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
 ` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
-          ${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
-          ${pcExplain(a)}
-          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${marketLinks(a).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
+          ${a.wholeLot && a.ebaySold == null ? `<span class="hint">A whole lot with no single card named, so there's no eBay or PriceCharting price to compare. Type a market value in Fix details if you have one.</span>` : ''}
+          ${a.wholeLot ? '' : ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}
+          ${a.wholeLot ? '' : pcExplain(a)}
+          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot ? [] : marketLinks(a)).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         <details>
           <summary>Fix details</summary>
@@ -713,7 +715,10 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (parsed[f] != null && parsed[f] !== '') out[f] = parsed[f];
     }
     if (parsed.endsAt && !edited.endsAt) { out.endsAt = parsed.endsAt; out.zone = parsed.zone; }
-    if (!edited.qty) out.qty = lotQty(out.cardName || '');
+    // A title as long as a sentence is post text, not an item name (usually a whole lot with no
+    // single card named): it's shown as "Lot #1", "Lot #2"… instead. Numbers are given after all cards are read.
+    out.wholeLot = !edited.cardName && !out.cardNumber && !out.grade && ((out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10 || /^Auction by /.test(out.cardName || ''));
+    if (!edited.qty) out.qty = out.wholeLot ? null : lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
     // End time and anti-snipe (rule read from the post, e.g. "+5 mins within the last 5 mins").
@@ -1008,6 +1013,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     let first = true;
     store.subscribe(list => {
       auctions = list.map(derive);
+      let lotNo = 0;
+      [...auctions].sort((x, y) => String(x.addedAt || '').localeCompare(String(y.addedAt || ''))).forEach(a => { if (a.wholeLot) { a.lotText = a.cardName; a.cardName = `Lot #${++lotNo}`; } });
       // Save corrected grades back, so the eBay page reader (which filters sold listings by the saved grade)
       // doesn't hunt for "PSA 9" on a sealed box that an older reader wrongly marked as graded.
       if (inExtension && store.patch) list.forEach((raw, i) => {
