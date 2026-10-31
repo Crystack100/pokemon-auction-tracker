@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.21.2';
+  const SITE_VERSION = '0.21.3';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -1008,6 +1008,12 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     let first = true;
     store.subscribe(list => {
       auctions = list.map(derive);
+      // Save corrected grades back, so the eBay page reader (which filters sold listings by the saved grade)
+      // doesn't hunt for "PSA 9" on a sealed box that an older reader wrongly marked as graded.
+      if (inExtension && store.patch) list.forEach((raw, i) => {
+        const g = auctions[i].grade || '';
+        if (raw.source === 'facebook' && (raw.grade || '') !== g) store.patch(raw.id, { grade: g });
+      });
       if (first && !list.length && !$('raw').value && !inExtension) {
         $('raw').value = EXAMPLE; readBench();
         $('parseNote').textContent = 'Example post loaded. Press Add to tracker to try it, or Clear and paste your own.';
