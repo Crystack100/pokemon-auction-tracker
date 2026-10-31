@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.23.0';
+  const SITE_VERSION = '0.23.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -290,7 +290,7 @@ function countdownText(iso) {
     return [
       // Opening eBay AU sold listings also saves their average to the card (read by the extension on that page).
       // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
-      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
+      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       // Opening PriceCharting from here also saves its price to the card (read by the extension on that page).
       ['PriceCharting', (a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)) + (inExtension ? '#pat=' + a.id : '')],

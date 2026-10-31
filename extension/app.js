@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.22.2';
+  const SITE_VERSION = '0.23.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -290,7 +290,7 @@ function countdownText(iso) {
     return [
       // Opening eBay AU sold listings also saves their average to the card (read by the extension on that page).
       // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
-      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
+      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       // Opening PriceCharting from here also saves its price to the card (read by the extension on that page).
       ['PriceCharting', (a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)) + (inExtension ? '#pat=' + a.id : '')],
@@ -516,6 +516,67 @@ function countdownText(iso) {
       for (const a of due) { await pcLookup(a); await new Promise(r => setTimeout(r, 1500)); }
     } finally { pcRunning = false; }
   }
+  // Card reader: sends an auction's first photos to Claude (with your own Anthropic API key, kept only in
+  // this browser's extension storage) and gets back the full card or product name, set and number.
+  // That name is then what eBay and PriceCharting are searched for. Each auction is read once
+  // (again only if its photos change); a title you typed in Fix details always wins.
+  const VISION_MODEL = 'claude-opus-5-5';
+  const VISION_SCHEMA = { type: 'object', additionalProperties: false, required: ['found', 'kind', 'searchName', 'setName', 'cardNumber', 'slab', 'count', 'confidence'], properties: {
+    found: { type: 'boolean' },
+    kind: { type: 'string', enum: ['single card', 'sealed product', 'several different items', 'unclear'] },
+    searchName: { type: 'string' }, setName: { type: 'string' }, cardNumber: { type: 'string' },
+    slab: { type: 'string' }, count: { type: 'integer' }, confidence: { type: 'string', enum: ['high', 'medium', 'low'] } } };
+  const VISION_PROMPT = `These photos are from a Pokémon TCG auction post in a Facebook group. Identify exactly what is being sold.
+Return:
+- found: false if you can't tell what Pokémon product this is.
+- kind: "single card", "sealed product", "several different items" (a lot of different cards/products), or "unclear".
+- searchName: the full English name as sellers write it in eBay titles, without grade, number or quantity. For a card: the card name with its variant and set, e.g. "Charizard ex Special Illustration Rare Obsidian Flames" or "Umbreon VMAX Alternate Art Evolving Skies". For sealed product: e.g. "Prismatic Evolutions Elite Trainer Box". Japanese products: say so, e.g. "Japanese Terastal Festival Booster Box".
+- setName: the set name, or "".
+- cardNumber: the number printed on the card, e.g. "199/165" or "TG30/TG30", or "" if not readable or not a card.
+- slab: the grading company and grade from a graded slab's label, e.g. "PSA 10" or "CGC 9.5", or "" if it isn't in a graded slab.
+- count: how many of this same item are for sale (1 if one).
+- confidence: how sure you are of searchName.
+Read the card number and slab label from the photo rather than guessing; leave a field "" when you can't read it.`;
+  const visionKeyOf = a => photos(a).slice(0, 2).map(photoKey).join('|');
+  let visionKey = null, visionRunning = false;
+  async function visionRead(a) {
+    const urls = photos(a).filter(u => /^https:/.test(u)).slice(0, 2);
+    const k = 'auction:' + a.id;
+    const save = async vision => { const cur = (await chrome.storage.local.get(k))[k]; if (cur) await chrome.storage.local.set({ [k]: { ...cur, vision: { ...vision, key: visionKeyOf(a), at: new Date().toISOString() } } }); };
+    const title = (a.lotText || a.title || a.cardName || '').slice(0, 300);
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': visionKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: VISION_MODEL, max_tokens: 4000, output_config: { effort: 'low', format: { type: 'json_schema', schema: VISION_SCHEMA } },
+          messages: [{ role: 'user', content: [...urls.map(url => ({ type: 'image', source: { type: 'url', url } })), { type: 'text', text: `${VISION_PROMPT}\n\nThe seller's title (may be vague or wrong): ${title}` }] }] }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = (j.error && j.error.message) || 'HTTP ' + res.status;
+        if (res.status === 401) { $('readerStatus').textContent = 'The API key was refused. Check it and save it again.'; return 'stop'; }
+        await save({ status: 'error', error: msg });
+        return res.status === 429 || res.status >= 500 ? 'stop' : null;
+      }
+      const block = (j.content || []).find(b => b.type === 'text');
+      const r = JSON.parse(block ? block.text : '{}');
+      await save({ status: r.found && r.searchName ? 'ok' : 'none', ...r });
+    } catch (e) { await save({ status: 'error', error: String(e.message || e) }); }
+  }
+  async function visionQueue() {
+    if (!inExtension || visionRunning || !visionKey) return;
+    visionRunning = true;
+    try {
+      const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
+        (!a.vision || (a.vision.key !== visionKeyOf(a) && a.vision.status !== 'error') || (a.vision.status === 'error' && Date.now() - Date.parse(a.vision.at) > 6 * 3600e3)));
+      for (const a of due) {
+        $('readerStatus').textContent = `Reading photos: ${a.cardName}…`;
+        if (await visionRead(a) === 'stop') break;
+        chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
+      }
+      if ($('readerStatus').textContent.startsWith('Reading')) $('readerStatus').textContent = 'On. New auctions are read from their photos.';
+    } finally { visionRunning = false; }
+  }
   function pcExplain(a) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
@@ -577,6 +638,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
+          ${a.visionUsed ? `<span class="hint">Read from the photo: <strong>${esc(a.cardName)}</strong>${a.cardNumber ? ' ' + esc(a.cardNumber) : ''}${a.grade ? ' · ' + esc(a.grade) : ''}${a.sellerTitle && a.sellerTitle !== a.cardName ? ` (seller's title: ${esc(a.sellerTitle.slice(0, 80))})` : ''}</span>` : a.vision && a.vision.status === 'error' && !(a.edited || {}).cardName ? `<span class="hint">Card reader couldn't read the photo (${esc(a.vision.error)}).</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
           ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
@@ -732,6 +794,18 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (!edited.qty) out.qty = out.wholeLot ? null : lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
+    // The name read from the photos (Card reader) is more exact than the seller's title.
+    const v = a.vision && a.vision.status === 'ok' && a.vision.confidence !== 'low' && a.vision.kind !== 'several different items' ? a.vision : null;
+    out.visionUsed = !!(v && !edited.cardName);
+    if (out.visionUsed) {
+      out.sellerTitle = out.cardName;
+      out.cardName = v.searchName;
+      out.wholeLot = false;
+      if (!edited.qty) out.qty = v.count > 1 ? v.count : lotQty(out.sellerTitle || '') || null;
+      if (!edited.cardNumber && v.cardNumber && !parsed.cardNumber) out.cardNumber = v.cardNumber;
+      if (!edited.setName && v.setName) out.setName = v.setName;
+      if (!edited.grade && !out.grade && v.slab && /^(PSA|BGS|CGC|TAG|ACE|SGC|Beckett)\b/i.test(v.slab)) out.grade = v.slab;
+    }
     // End time and anti-snipe (rule read from the post, e.g. "+5 mins within the last 5 mins").
     // Only comment times from Facebook count (not when the tracker happened to read them), and
     // anything posted after the end is left out of the bids.
@@ -982,6 +1056,23 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
         chrome.runtime.sendMessage({ type: 'update-now' });
         $('sweepMinutes').value = String(settings && settings.sweepMinutes != null ? settings.sweepMinutes : 5);
       });
+      // Card reader: your Anthropic API key stays in this browser's extension storage and is only sent to Anthropic.
+      $('readerToggle').hidden = false;
+      $('readerToggle').addEventListener('click', () => { $('readerBox').hidden = !$('readerBox').hidden; });
+      const showReader = () => {
+        $('readerKey').value = ''; $('readerKey').placeholder = visionKey ? 'Key saved (sk-ant-…' + visionKey.slice(-4) + ')' : 'sk-ant-…';
+        $('readerOff').hidden = !visionKey;
+        $('readerToggle').textContent = visionKey ? 'Card reader: on' : 'Card reader';
+        if (!$('readerStatus').textContent.startsWith('Reading')) $('readerStatus').textContent = visionKey ? 'On. New auctions are read from their photos.' : 'Off.';
+      };
+      chrome.storage.local.get('settings').then(({ settings }) => { visionKey = (settings && settings.claudeKey) || null; showReader(); visionQueue(); });
+      $('readerForm').addEventListener('submit', async e => {
+        e.preventDefault();
+        const key = $('readerKey').value.trim();
+        if (!/^sk-ant-/.test(key)) { $('readerStatus').textContent = 'That doesn\'t look like an Anthropic API key (it starts with sk-ant-).'; return; }
+        visionKey = key; await saveSetting({ claudeKey: key }); showReader(); visionQueue();
+      });
+      $('readerOff').addEventListener('click', async () => { visionKey = null; await saveSetting({ claudeKey: null }); showReader(); });
       $('sweepMinutes').addEventListener('change', e => saveSetting({ sweepMinutes: Number(e.target.value) }));
       const showScan = r => {
         const n = (k, w) => `${r[k]} ${w}${r[k] === 1 ? '' : 's'}`;
@@ -1032,6 +1123,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (inExtension && store.patch) list.forEach((raw, i) => {
         const g = auctions[i].grade || '';
         if (raw.source === 'facebook' && (raw.grade || '') !== g) store.patch(raw.id, { grade: g });
+        // The background eBay check searches the saved name, so it gets the name read from the photos too.
+        if (raw.source === 'facebook' && auctions[i].visionUsed && raw.cardName !== auctions[i].cardName) store.patch(raw.id, { cardName: auctions[i].cardName });
       });
       if (first && !list.length && !$('raw').value && !inExtension) {
         $('raw').value = EXAMPLE; readBench();
@@ -1040,6 +1133,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       first = false;
       render();
       pcQueue();
+      visionQueue();
     }, err => { $('storeStatus').textContent = 'Could not load saved auctions: ' + (err.message || err.code); });
     setInterval(tick, 1000);
   }

@@ -6,7 +6,7 @@
 
   function searchUrl(query, site = 'au') {
     const host = site === 'us' ? 'www.ebay.com' : 'www.ebay.com.au';
-    return `https://${host}/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60`;
+    return `https://${host}/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=60${/\.com\.au$/.test(host) ? '&LH_PrefLoc=1' : ''}`;
   }
 
   // A listing counts as the same item when it has the grade (if any) and most of the search words.
