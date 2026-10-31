@@ -113,7 +113,11 @@ async function onAuctionSeen(p, fromTabId, track) {
   // re-read the post with its newest rules.
   // Each comment keeps when it was posted (from Facebook) and when it was first read, so the
   // tracker website can leave out comments made after the auction ended.
-  const known = new Map((a.allComments || []).map(c => [c.name + '|' + c.text, c]));
+  // Once after this update, the comments are started again from a reading of the post itself, which clears
+  // out comments an older version took from other posts (a wrong current bid). Later readings add to them.
+  const fresh = a.commentFix !== 1 && (p.comments || []).length > 0;
+  if (fresh) a.commentFix = 1;
+  const known = new Map((fresh ? [] : a.allComments || []).map(c => [c.name + '|' + c.text, c]));
   for (const c of p.comments || []) {
     const k = c.name + '|' + c.text, old = known.get(k);
     if (!old) known.set(k, { name: c.name, text: c.text, at: c.at || null, seen: p.seenAt });
@@ -290,7 +294,9 @@ async function silentCheck(url, groupId, targetId, track) {
     report.posts = posts.length;
     // When checking one tracked auction, make sure the reading lands on that card even if Facebook's ids differ.
     // A "pfbid…" link has no post number: its own page shows that post first.
-    const target = targetId && (posts.find(p => p.key === targetId) || (/^pfbid/.test(targetId) && posts[0]) || (!track && posts.find(p => AUCTION_RE.test(p.text))));
+    // Never another post on the page: that put other auctions' comments, bids and photos on this card.
+    const target = targetId && (posts.find(p => p.key === targetId) || (/^pfbid/.test(targetId) && posts[0]));
+    if (targetId && !target) return;
     if (track && !target) return;
     if (track === 'auction' && !AUCTION_RE.test(target.text)) return; // found in the background: auctions only
     if (target && /^\d+$/.test(targetId)) target.key = targetId;
