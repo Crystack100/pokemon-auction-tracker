@@ -308,9 +308,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Only PriceCharting pages, read as a normal visit without your cookies.
   if (msg.type === 'pc-fetch') {
     let u = null; try { u = new URL(msg.url); } catch {}
-    if (!u || u.protocol !== 'https:' || u.hostname !== 'www.pricecharting.com') { sendResponse({ error: 'not allowed' }); return; }
+    // Also: the Pokémon TCG card list (to name a card from the number on its photo), and Facebook's
+    // photo files (to read the text on the card), returned as image data.
+    const photo = u && /(^|\.)fbcdn\.net$/.test(u.hostname);
+    if (!u || u.protocol !== 'https:' || !(u.hostname === 'www.pricecharting.com' || u.hostname === 'api.pokemontcg.io' || photo)) { sendResponse({ error: 'not allowed' }); return; }
     fetch(u.href, { credentials: 'omit' })
-      .then(async r => sendResponse({ status: r.status, url: r.url, text: await r.text() }))
+      .then(async r => {
+        if (!photo) return sendResponse({ status: r.status, url: r.url, text: await r.text() });
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        sendResponse({ status: r.status, url: r.url, dataUrl: `data:${r.headers.get('content-type') || 'image/jpeg'};base64,${btoa(bin)}` });
+      })
       .catch(e => sendResponse({ error: String(e.message || e) }));
     return true;
   }

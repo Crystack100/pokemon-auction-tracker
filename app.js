@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.24.1';
+  const SITE_VERSION = '0.25.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -516,6 +516,34 @@ function countdownText(iso) {
       for (const a of due) { await pcLookup(a); await new Promise(r => setTimeout(r, 1500)); }
     } finally { pcRunning = false; }
   }
+  // Card name from the photo: reads the text on the first photos (free, in this browser) and looks the
+  // card number up in the Pokémon TCG card list. Each auction is read once, again only if its photos change.
+  const photoIdKey = a => photos(a).slice(0, 2).map(photoKey).join('|');
+  let photoIdRunning = false, photoIdOff = false;
+  async function photoIdQueue() {
+    if (!inExtension || !window.PhotoId || photoIdRunning || photoIdOff) return;
+    photoIdRunning = true;
+    try {
+      const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
+      for (const a of due) {
+        let result;
+        try {
+          const imgs = [];
+          for (const u of photos(a).filter(u => /^https:/.test(u)).slice(0, 2)) {
+            const r = await fetchPage(u);
+            if (r && r.error === 'not allowed') { photoIdOff = true; return; } // extension older than 0.20.0
+            if (r && r.dataUrl) imgs.push(r.dataUrl);
+          }
+          if (!imgs.length) throw new Error("photos couldn't be downloaded");
+          const fetchJson = async url => { const r = await fetchPage(url); if (!r || r.error || r.status >= 400) throw new Error((r && r.error) || 'card list answered ' + (r && r.status)); return JSON.parse(r.text); };
+          result = await window.PhotoId.identify(imgs, fetchJson, a.lotText || a.cardName || '');
+        } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
+        await store.patch(a.id, { photoId: { ...result, key: photoIdKey(a), at: new Date().toISOString() } });
+        if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
+      }
+    } finally { photoIdRunning = false; }
+  }
   function pcExplain(a) {
     const pc = a.pc;
     if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
@@ -577,6 +605,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
+          ${a.photoUsed ? `<span class="hint">From the photo: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
           ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
@@ -732,6 +761,22 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (!edited.qty) out.qty = out.wholeLot ? null : lotQty(out.cardName || '');
     if (!edited.cardNumber && parsed.cardNumber) out.cardNumber = parsed.cardNumber;
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
+    // The card read from the photo backs up the post: it names the card when the post doesn't
+    // (or only gives a long description), and adds the set and number when the post has just the name.
+    const pid = a.photoId && a.photoId.status === 'ok' ? a.photoId : null;
+    out.photoUsed = null;
+    if (pid && !edited.cardName) {
+      const titleNames = new RegExp(`(^|[^a-z])${pid.pokemon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '');
+      const noName = /^Auction by /.test(out.cardName || '') || ((out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10);
+      if (titleNames && !out.cardNumber) out.photoUsed = 'number';
+      else if (!titleNames && noName && pid.distinct === 1) { out.photoUsed = 'name'; out.sellerTitle = out.cardName; out.cardName = pid.name; }
+      if (out.photoUsed) {
+        if (!edited.cardNumber) out.cardNumber = pid.number;
+        if (!edited.setName) out.setName = pid.set;
+        out.wholeLot = false;
+        if (!edited.qty) out.qty = lotQty(out.sellerTitle || out.cardName || '');
+      }
+    }
     // End time and anti-snipe (rule read from the post, e.g. "+5 mins within the last 5 mins").
     // Only comment times from Facebook count (not when the tracker happened to read them), and
     // anything posted after the end is left out of the bids.
@@ -1045,6 +1090,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       if (inExtension && store.patch) list.forEach((raw, i) => {
         const g = auctions[i].grade || '';
         if (raw.source === 'facebook' && (raw.grade || '') !== g) store.patch(raw.id, { grade: g });
+        // The background eBay check searches the saved name, so it gets the name read from the photo too.
+        if (raw.source === 'facebook' && auctions[i].photoUsed === 'name' && raw.cardName !== auctions[i].cardName) store.patch(raw.id, { cardName: auctions[i].cardName });
       });
       if (first && !list.length && !$('raw').value && !inExtension) {
         $('raw').value = EXAMPLE; readBench();
@@ -1053,6 +1100,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       first = false;
       render();
       pcQueue();
+      photoIdQueue();
     }, err => { $('storeStatus').textContent = 'Could not load saved auctions: ' + (err.message || err.code); });
     setInterval(tick, 1000);
   }

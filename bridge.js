@@ -4,7 +4,7 @@
 (function () {
   // Always fetch the newest reader and page code (no stale copies from the browser cache).
   const add = src => new Promise(res => { const s = document.createElement('script'); s.src = src + '?v=' + Date.now(); s.onload = s.onerror = res; document.body.append(s); });
-  const load = () => add('parser.js').then(() => add('app.js'));
+  const load = () => add('parser.js').then(() => add('photo-id.js')).then(() => add('app.js'));
   if (window.chrome && chrome.storage && chrome.storage.local && chrome.runtime && chrome.runtime.id) return load();
   let n = 0;
   const pending = new Map();
