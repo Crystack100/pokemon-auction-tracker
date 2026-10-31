@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.25.0';
+  const SITE_VERSION = '0.25.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -152,7 +152,10 @@ Reply`;
   }
 // Photos you removed with "Not this post" in the photo viewer stay hidden.
 const photoKey = u => String(u).split('?')[0].split('/').pop();
-const photos = a => (a.images && a.images.length ? a.images : a.image ? [a.image] : []).filter(u => !(a.hiddenPhotos || []).includes(photoKey(u)));
+// Not the post's own photos (saved by older versions): video/reel thumbnails, stories, Instagram, ads,
+// profile pictures, and previews of links to other sites.
+const NOT_PHOTO = /\/\/external[.-]|safe_image|\/t15\.|\/t51\.|\/t45\.|\/t39\.30808-1\/|\/t1\.30497-1\//;
+const photos = a => (a.images && a.images.length ? a.images : a.image ? [a.image] : []).filter(u => !NOT_PHOTO.test(String(u)) && !(a.hiddenPhotos || []).includes(photoKey(u)));
 
 function countdownText(iso) {
     if (!iso) return { text: 'No end time', soon: false, ended: false };

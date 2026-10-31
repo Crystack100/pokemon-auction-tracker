@@ -160,6 +160,11 @@
       if (img.closest('[aria-label^="Comment by"], [aria-label^="Reply by"], .pat-bar')) continue;
       const src = img.tagName === 'IMG' ? (img.currentSrc || img.src) : (img.getAttribute('href') || img.getAttribute('xlink:href') || '');
       if (!src || !/fbcdn|scontent/.test(src) || /emoji|static\.xx|rsrc\.php/.test(src)) continue;
+      // Only the post's own photos: not videos, reels, stories, link previews from other sites, or profile pictures.
+      if (/\/\/external[.-]|safe_image|\/t15\.|\/t51\.|\/t45\.|\/t39\.30808-1\/|\/t1\.30497-1\//.test(src)) continue;
+      const link = (img.closest('a[href]') || {}).href || '';
+      if (/\/(stories|reel|reels|watch|videos?)\/|l\.facebook\.com\/l\.php|instagram\.com|tiktok\.com|youtube\.com|youtu\.be/.test(link)) continue;
+      if (img.closest('[aria-label*="stories" i], [aria-label*="reels" i], video')) continue;
       const r = img.getBoundingClientRect();
       const w = Math.max(img.naturalWidth || 0, r.width), h = Math.max(img.naturalHeight || 0, r.height);
       const inPhotoLink = PHOTO_LINK.test((img.closest('a[href]') || {}).href || '');
