@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.27.1';
+  const SITE_VERSION = '0.28.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -528,7 +528,7 @@ function countdownText(iso) {
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 3) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 4) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
       for (const a of due) {
         let result;
         try {
@@ -558,10 +558,11 @@ function countdownText(iso) {
             }
           }
           // Then (or if eBay didn't name it): the text printed on the photo.
-          result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title);
+          const fetchImg = async url => { const r = await fetchPage(url); if (!r || !r.dataUrl) throw new Error('picture'); return r.dataUrl; };
+          result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title, fetchImg);
           if (ebay) result = { ...result, ebayTried: ebay.status === 'error' && ebayKeysBad ? null : ebayKeyTag, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
-        await store.patch(a.id, { photoId: { ...result, v: 3, key: photoIdKey(a), at: new Date().toISOString() } });
+        await store.patch(a.id, { photoId: { ...result, v: 4, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       }
     } finally { photoIdRunning = false; }
@@ -630,7 +631,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
 ` : ''}
           ${a.photoNameOnly ? `<span class="hint">Name read from the photo: <strong>${esc(a.cardName)}</strong> (the post says "${esc((a.sellerTitle || '').slice(0, 60))}"). Set and number not found yet.</span>` : ''}
           ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? ` (${esc(a.photoId.error)})` : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
-          ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
+          ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.source === 'picture' ? (a.photoId.guessed ? `Closest picture match (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards, not certain)` : `Matched by picture (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards)`) : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
           ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
@@ -804,7 +805,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       const titleNames = new RegExp(`(^|[^a-z])${pid.pokemon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '');
       const noName = /^Auction by /.test(out.cardName || '') || ((out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10);
       if (titleNames && !out.cardNumber) out.photoUsed = 'number';
-      else if (!titleNames && (noName || pid.source === 'ebay') && pid.distinct === 1) { out.photoUsed = 'name'; out.sellerTitle = out.cardName; out.cardName = pid.name; }
+      else if (!titleNames && (noName || pid.source === 'ebay' || pid.source === 'picture') && pid.distinct === 1) { out.photoUsed = 'name'; out.sellerTitle = out.cardName; out.cardName = pid.name; }
       if (out.photoUsed) {
         if (!edited.cardNumber) out.cardNumber = pid.number;
         if (!edited.setName) out.setName = pid.set;

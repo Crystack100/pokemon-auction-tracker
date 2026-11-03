@@ -107,7 +107,68 @@ window.PhotoId = (() => {
     return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
   }
 
-  async function identify(dataUrls, fetchJson, title) {
+  // Looking at the picture: the card in the photo (found by cutting away the plain background around it),
+  // shrunk to a small grid of colours, compared with the card list's picture of every printing of that Pokémon.
+  const GW = 16, GH = 22;
+  function grid(img, box) {
+    const c = document.createElement('canvas'); c.width = GW; c.height = GH;
+    const g = c.getContext('2d'); g.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, GW, GH);
+    const d = g.getImageData(0, 0, GW, GH).data, v = [];
+    for (let i = 0; i < d.length; i += 4) v.push(d[i], d[i + 1], d[i + 2]);
+    // Even out lighting: each colour channel to mean 0, spread 1.
+    for (let ch = 0; ch < 3; ch++) {
+      let m = 0, n = 0; for (let i = ch; i < v.length; i += 3) { m += v[i]; n++; } m /= n;
+      let sd = 0; for (let i = ch; i < v.length; i += 3) sd += (v[i] - m) ** 2; sd = Math.sqrt(sd / n) || 1;
+      for (let i = ch; i < v.length; i += 3) v[i] = (v[i] - m) / sd;
+    }
+    return v;
+  }
+  // Where the card is in the photo: everything that differs clearly from the colour of the photo's corners.
+  function cardBox(img) {
+    const W = 200, H = Math.round(img.naturalHeight * W / img.naturalWidth);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0, W, H);
+    const d = g.getImageData(0, 0, W, H).data;
+    const px = (x, y) => { const i = (y * W + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+    const corners = [px(2, 2), px(W - 3, 2), px(2, H - 3), px(W - 3, H - 3)];
+    const bg = [0, 1, 2].map(k => corners.reduce((s, c) => s + c[k], 0) / 4);
+    let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    const rows = new Array(H).fill(0), cols = new Array(W).fill(0);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const p = px(x, y);
+      if (Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2]) > 90) { rows[y]++; cols[x]++; }
+    }
+    for (let y = 0; y < H; y++) if (rows[y] > W * 0.15) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    for (let x = 0; x < W; x++) if (cols[x] > H * 0.15) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+    const k = img.naturalWidth / W;
+    if (x1 - x0 < W * 0.2 || y1 - y0 < H * 0.2) return { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+    return { x: x0 * k, y: y0 * k, w: (x1 - x0 + 1) * k, h: (y1 - y0 + 1) * k };
+  }
+  const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; };
+  async function byPicture(pokemon, dataUrl, fetchJson, fetchImg) {
+    if (!pokemon || !fetchImg) return null;
+    const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
+    const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(nameQ) + '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=60');
+    const cards = ((r && r.data) || []).filter(c => c.images && c.images.small);
+    if (!cards.length) return null;
+    const photo = await loadImg(dataUrl);
+    const mine = grid(photo, cardBox(photo));
+    const scored = [];
+    for (let i = 0; i < cards.length; i += 6) {
+      await Promise.all(cards.slice(i, i + 6).map(async c => {
+        try { const im = await loadImg(await fetchImg(c.images.small)); scored.push({ c, d: dist(mine, grid(im, { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight })) }); } catch {}
+      }));
+    }
+    scored.sort((a, b) => a.d - b.d);
+    if (!scored.length) return null;
+    const [best, next] = scored;
+    const sure = !next || best.d < next.d * 0.9;
+    const c = best.c;
+    return { status: 'ok', name: c.name, set: c.set.name, number: `${c.number}/${c.set.printedTotal}`, rarity: c.rarity || '', pokemon, matches: scored.length,
+      source: 'picture', guessed: !sure, score: Math.round(best.d * 100) / 100 };
+  }
+
+  async function identify(dataUrls, fetchJson, title, fetchImg) {
     let text = '', pokemon = null, nums = [];
     for (const d of dataUrls) {
       text += await readText(d);
@@ -118,6 +179,10 @@ window.PhotoId = (() => {
     let found = nums.length ? await lookup(named, nums, fetchJson, title) || await lookup(pokemon, nums, fetchJson, title) : null;
     let note = '';
     if (!found) { const b = await byName(named, title, text, fetchJson); if (b && b.status === 'ok') found = b; else if (b) note = b.note; }
+    // No number, or only a guess between several printings: compare the photo with each printing's picture.
+    if ((!found || found.guessed) && (named || pokemon)) {
+      try { const p = await byPicture(named || pokemon, dataUrls[0], fetchJson, fetchImg); if (p && (!found || !p.guessed)) found = p; } catch (e) { note = note || 'picture compare failed'; }
+    }
     const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 200);
     if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon || named ? { status: 'partial', pokemon: pokemon || named, distinct: nums.length, text: excerpt, note } : { status: 'none', text: excerpt, note };

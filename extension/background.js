@@ -362,7 +362,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let u = null; try { u = new URL(msg.url); } catch {}
     // Also: the Pokémon TCG card list (to name a card from the number on its photo), and Facebook's
     // photo files (to read the text on the card), returned as image data.
-    const photo = u && /(^|\.)fbcdn\.net$/.test(u.hostname);
+    const photo = u && (/(^|\.)fbcdn\.net$/.test(u.hostname) || u.hostname === 'images.pokemontcg.io');
     if (!u || u.protocol !== 'https:' || !(u.hostname === 'www.pricecharting.com' || u.hostname === 'api.pokemontcg.io' || photo)) { sendResponse({ error: 'not allowed' }); return; }
     fetch(u.href, { credentials: 'omit' })
       .then(async r => {
