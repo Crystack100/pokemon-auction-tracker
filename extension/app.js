@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.33.0';
+  const SITE_VERSION = '0.33.1';
   const $ = id => document.getElementById(id);
   // The browser can keep an older copy of the page for a few minutes after an update, while this code is
   // always the newest: if the page is older than this code expects, load the page again fresh (once).
@@ -916,7 +916,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     return jobs;
   }
   const extAtLeast = (maj, min) => { const v = (chrome.runtime.getManifest().version || '0').split('.').map(Number); return v[0] > maj || (v[0] === maj && v[1] >= min); };
-  let fillState = null;
+  let fillState = null, fillSent = [], stopTimer = null, fillStopping = false, fillStoppedByYou = false;
+  try { fillSent = JSON.parse(sessionStorage.getItem('patFillJobs') || '[]'); } catch {}
   function showFill() {
     if (!inExtension) return;
     const n = fillJobs().length, f = fillState;
@@ -924,15 +925,33 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     $('fillBtn').hidden = !running && !n;
     $('fillBtn').disabled = !!running;
     $('fillBtn').textContent = running ? `Finding prices… ${f.done} of ${f.total}` : `Find all market prices (${n})`;
-    $('fillStatus').textContent = running ? '' : !f ? '' : f.stopped === 'blocked'
+    $('fillStop').hidden = !running;
+    $('fillStop').disabled = fillStopping;
+    $('fillStop').textContent = fillStopping ? 'Stopping…' : 'Stop';
+    if (!running) fillStopping = false;
+    $('fillStatus').textContent = running ? '' : !f ? '' : f.stopped === 'you' || (f.stopped === 'blocked' && fillStoppedByYou) ? `Stopped. Prices found for ${f.found} of ${f.done} checked.` : f.stopped === 'blocked'
       ? `Stopped after ${f.done} of ${f.total}: eBay stopped showing results. Open one card's "eBay AU sold" link yourself (eBay may ask you to confirm you're a person), then press the button again.`
       : f.total ? `Last run found prices for ${f.found} of ${f.total}.` : '';
   }
+  // Stop: newer extensions stop on 'ebay-fill-stop'; 0.25.0 stops when told the card it's on can't be read,
+  // so that's sent for the current card (again each second, in case it's between cards) until the run ends.
+  function stopFill() {
+    fillStopping = true; fillStoppedByYou = true; showFill();
+    const send = () => {
+      if (!fillState || !fillState.running) { clearInterval(stopTimer); stopTimer = null; return; }
+      chrome.runtime.sendMessage({ type: 'ebay-fill-stop' });
+      const cur = fillState.current || (fillSent[fillState.done] || {}).id;
+      if (cur) chrome.runtime.sendMessage({ type: 'ebay-blocked', id: cur });
+    };
+    send(); clearInterval(stopTimer); stopTimer = setInterval(send, 1000);
+  }
   async function startFill() {
+    fillStopping = false; fillStoppedByYou = false;
     if (!extAtLeast(0, 25)) { $('fillStatus').textContent = 'This button needs extension 0.25.0. Reinstall the extension once with the new zip, then press it again.'; return; }
     const jobs = fillJobs();
     if (!jobs.length) return;
     fillState = { running: true, total: jobs.length, done: 0, found: 0, at: new Date().toISOString() }; showFill();
+    fillSent = jobs; try { sessionStorage.setItem('patFillJobs', JSON.stringify(jobs.map(j => ({ id: j.id })))); } catch {}
     chrome.runtime.sendMessage({ type: 'ebay-fill', jobs });
   }
   let sortFlipped = false;
@@ -1012,6 +1031,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     }));
     $('sort').addEventListener('change', () => { sortFlipped = false; showSortDir(); render(); });
     $('fillBtn').addEventListener('click', startFill);
+    $('fillStop').addEventListener('click', stopFill);
     if (inExtension) {
       chrome.storage.local.get('ebayFill').then(r => { fillState = r.ebayFill || null; showFill(); });
       chrome.storage.onChanged.addListener(ch => { if (ch.ebayFill) { fillState = ch.ebayFill.newValue; showFill(); } });

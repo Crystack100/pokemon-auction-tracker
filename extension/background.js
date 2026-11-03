@@ -358,7 +358,7 @@ async function ebayImageSearch(imageUrl) {
 // in a background tab, one at a time, exactly like clicking its link; the page is read by ebay-content.js /
 // pc-content.js as usual, then the tab is closed. If eBay stops showing results (for example it asks you to prove
 // you're a person), the run stops and asks you to open one link yourself. Nothing is bypassed.
-let fillWaiter = null;
+let fillWaiter = null, fillStop = false;
 async function fillStatus(patch) { const cur = (await chrome.storage.local.get('ebayFill')).ebayFill || {}; await chrome.storage.local.set({ ebayFill: { ...cur, ...patch, at: new Date().toISOString() } }); }
 async function runFill(jobs) {
   const cur = (await chrome.storage.local.get('ebayFill')).ebayFill;
@@ -366,16 +366,21 @@ async function runFill(jobs) {
   jobs = jobs.filter(j => j && typeof j.url === 'string' && /^https:\/\/(www\.ebay\.com\.au|www\.pricecharting\.com)\//.test(j.url) && /#pat=/.test(j.url)).slice(0, 60);
   await chrome.storage.local.set({ ebayFill: { running: true, total: jobs.length, done: 0, found: 0, stopped: null, at: new Date().toISOString() } });
   let found = 0, misses = 0;
+  fillStop = false;
   for (const [i, job] of jobs.entries()) {
+    if (fillStop) { await fillStatus({ running: false, stopped: 'you' }); return; }
+    await fillStatus({ current: job.id });
     const tab = await chrome.tabs.create({ url: job.url, active: false });
     const got = await new Promise(res => { fillWaiter = { id: job.id, item: job.item ?? null, pc: /pricecharting/.test(job.url), res }; setTimeout(() => res(null), 30000); });
     fillWaiter = null;
     chrome.tabs.remove(tab.id).catch(() => {});
+    if (got && got.stop) { chrome.tabs.remove(tab.id).catch(() => {}); await fillStatus({ done: i, found, running: false, stopped: 'you' }); return; }
     if (got && got.blocked) { await fillStatus({ done: i, found, running: false, stopped: 'blocked' }); return; }
     if (got) { misses = 0; if (got.ok) found++; } else misses++;
     await fillStatus({ done: i + 1, found });
     if (misses >= 2) { await fillStatus({ running: false, stopped: 'blocked' }); return; }
-    if (i < jobs.length - 1) await new Promise(r => setTimeout(r, 5000 + Math.random() * 3000)); // a calm pace, like clicking through by hand
+    if (i < jobs.length - 1) await new Promise(r => { const t = setTimeout(r, 5000 + Math.random() * 3000); fillWaiter = { id: null, res: () => { clearTimeout(t); r(); } }; });
+    fillWaiter = null; // a calm pace, like clicking through by hand
   }
   await fillStatus({ running: false });
 }
@@ -402,6 +407,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'ebay-fill' && Array.isArray(msg.jobs)) runFill(msg.jobs);
+  if (msg.type === 'ebay-fill-stop') { fillStop = true; if (fillWaiter) fillWaiter.res({ stop: true }); }
   if (fillWaiter && msg.type === 'ebay-blocked' && msg.id === fillWaiter.id) fillWaiter.res({ blocked: true });
   if (fillWaiter && msg.id === fillWaiter.id && ((msg.type === 'ebay-result' && !fillWaiter.pc && (msg.item ?? null) === fillWaiter.item) || (msg.type === 'pc-page' && fillWaiter.pc))) fillWaiter.res({ ok: msg.type === 'pc-page' || (msg.result && msg.result.status === 'ok') });
   if (msg.type === 'track-saved' && Array.isArray(msg.posts)) trackSaved(msg.posts);
