@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.28.0';
+  const SITE_VERSION = '0.28.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -802,12 +802,17 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     }
     out.photoUsed = null;
     if (pid && !edited.cardName) {
-      const titleNames = new RegExp(`(^|[^a-z])${pid.pokemon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '');
-      const noName = /^Auction by /.test(out.cardName || '') || ((out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10);
-      if (titleNames && !out.cardNumber) out.photoUsed = 'number';
-      else if (!titleNames && (noName || pid.source === 'ebay' || pid.source === 'picture') && pid.distinct === 1) { out.photoUsed = 'name'; out.sellerTitle = out.cardName; out.cardName = pid.name; }
+      // The card found from the photo comes first; the post's title only helps. Exceptions: sealed product
+      // (a box or ETB in the title), and an uncertain photo match when the post itself gives a card number.
+      const longTitle = (out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10; // a description, not a name
+      const sealed = !longTitle && /\b(etb|elite trainer|booster|box|bundle|tin|collection|pack|sealed|blister)\b/i.test(out.cardName || '');
+      if (!sealed && pid.distinct === 1 && !(pid.guessed && out.cardNumber)) {
+        out.photoUsed = 'name';
+        if (normName(out.cardName) !== normName(pid.name)) out.sellerTitle = out.cardName;
+        out.cardName = pid.name;
+      } else if (!sealed && !out.cardNumber && new RegExp(`(^|[^a-z])${pid.pokemon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '')) out.photoUsed = 'number';
       if (out.photoUsed) {
-        if (!edited.cardNumber) out.cardNumber = pid.number;
+        if (!edited.cardNumber && pid.number) out.cardNumber = pid.number;
         if (!edited.setName) out.setName = pid.set;
         out.wholeLot = false;
         if (!edited.qty) out.qty = lotQty(out.sellerTitle || out.cardName || '');

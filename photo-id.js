@@ -175,7 +175,8 @@ window.PhotoId = (() => {
       pokemon = await pokemonIn(text); nums = numbersIn(text);
       if (nums.length) break;
     }
-    const named = (await titlePokemon(title)) || pokemon;
+    // The photo first; the post's title only if the photo didn't show a Pokémon's name.
+    const named = pokemon || (await titlePokemon(title));
     let found = nums.length ? await lookup(named, nums, fetchJson, title) || await lookup(pokemon, nums, fetchJson, title) : null;
     let note = '';
     if (!found) { const b = await byName(named, title, text, fetchJson); if (b && b.status === 'ok') found = b; else if (b) note = b.note; }
