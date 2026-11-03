@@ -177,10 +177,21 @@ window.PhotoId = (() => {
   let hint = null;
   function setPostText(text) {
     text = text || '';
-    if (THIRTIETH.re.test(text) && /\b30\s?th\b/i.test(text)) { hint = THIRTIETH; return hint; }
+    if (/\b30\s?th\b|\b30(?:th)?\s*(?:anniv|celebration)|thirtieth/i.test(text)) { hint = THIRTIETH; return hint; }
     const s = SETS.find(x => x.re.test(text) && x.n !== '151' && x.n !== 'Dragon' && x.n !== 'Platinum' && x.n !== 'Arceus' && x.n !== 'Generations' && x.n !== 'Evolutions');
     hint = s ? { label: s.n, re: new RegExp('^' + esc(s.n) + '$', 'i') } : null;
     return hint;
+  }
+  // A card found by eBay or the photo's number but printed in another set than the post names (the 30th Celebration
+  // reprints look like the originals, with gold borders): the same card in the post's set, or its name with that set.
+  async function fitHint(c, fetchJson) {
+    if (!hint || !c || !c.name || hint.re.test(c.set || '')) return c;
+    let same = [];
+    try { same = inHint(await cardsQuery(`name:"${c.name}"`, '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=50', fetchJson)); } catch {}
+    const m = same.find(x => x.name.toLowerCase() === c.name.toLowerCase()) || null;
+    const other = `${c.set || ''} ${c.number || ''}`.trim();
+    return m ? { ...c, name: m.name, set: m.set.name, number: `${m.number}/${m.set.printedTotal}`, setFromPost: true, otherPrinting: other }
+      : { ...c, set: hint.label, number: '', setFromPost: true, otherPrinting: other };
   }
   const inHint = cards => hint ? cards.filter(c => hint.re.test((c.set && c.set.name) || '')) : cards;
 
@@ -201,12 +212,13 @@ window.PhotoId = (() => {
       if (!found && pokemon && rar) { const b = await byName(pokemon, rar[0], titles.join(' '), fetchJson); if (b && b.status === 'ok') found = b; }
     } catch (e) { listErr = e; }
     const sample = titles.slice(0, 3);
-    if (found) return { ...found, source: 'ebay', distinct: 1, titles: sample };
+    if (found) return { ...(await fitHint(found, fetchJson)), source: 'ebay', distinct: 1, titles: sample };
     const named0 = setFrom(titles);
     // The card lists couldn't confirm it (down, or the card isn't in them): the eBay titles alone are enough
     // when most of them agree on the Pokémon and the number.
     if (sure && pokemon) {
       const named = cardNameFrom(titles, pokemon);
+      if (hint && named0 && !hint.re.test(named0)) return { status: 'ok', source: 'ebay', name: named, set: hint.label, number: '', rarity: rar ? rar[0] : '', pokemon, distinct: 1, titles: sample, fromTitlesOnly: true, setFromPost: true, otherPrinting: `${named0} ${num[0]}` };
       return { status: 'ok', source: 'ebay', name: named, set: named0 || (hint ? hint.label : ''), number: num[0], rarity: rar ? rar[0] : '', pokemon, distinct: 1, titles: sample, fromTitlesOnly: true, listError: listErr ? String(listErr.message || listErr) : null };
     }
     return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
@@ -345,7 +357,7 @@ window.PhotoId = (() => {
       try { const p = await byPicture(named || pokemon, dataUrls[0], fetchJson, fetchImg); if (p && (!found || !p.guessed)) found = p; } catch (e) { note = note || 'picture compare failed'; }
     }
     const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
+    if (found) return { ...(await fitHint(found, fetchJson)), distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon || named ? { status: 'partial', pokemon: pokemon || named, distinct: nums.length, text: excerpt, note } : { status: 'none', text: excerpt, note };
   }
   return { identify, identifyMany, pokemonAll, fromTitles, numbersIn, pokemonIn, setPostText };
