@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.27.0';
+  const SITE_VERSION = '0.27.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -522,13 +522,13 @@ function countdownText(iso) {
   // Card name from the photo: reads the text on the first photos (free, in this browser) and looks the
   // card number up in the Pokémon TCG card list. Each auction is read once, again only if its photos change.
   const photoIdKey = a => photos(a).slice(0, 2).map(photoKey).join('|');
-  let photoIdRunning = false, photoIdOff = false, ebayKeys = false;
+  let photoIdRunning = false, photoIdOff = false, ebayKeys = false, ebayKeyTag = '', ebayKeysBad = false;
   async function photoIdQueue() {
     if (!inExtension || !window.PhotoId || photoIdRunning || photoIdOff) return;
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 3) || (ebayKeys && !a.photoId.ebayTried && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 3) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
       for (const a of due) {
         let result;
         try {
@@ -543,14 +543,23 @@ function countdownText(iso) {
           const title = a.lotText || a.cardName || '';
           // First: eBay's image search (with your eBay keys) finds listings of the same card, and their titles name it.
           let ebay = null;
-          if (ebayKeys) {
+          if (ebayKeys && !ebayKeysBad) {
             const r = await fetchPage({ ebayImage: photos(a).find(u => /^https:/.test(u)) });
             if (r && r.titles) ebay = r.titles.length ? await window.PhotoId.fromTitles(r.titles, fetchJson, title) : { status: 'none', source: 'ebay', titles: [] };
-            else if (r && r.error) ebay = { status: 'error', source: 'ebay', error: r.error };
+            else if (r && r.error) {
+              ebay = { status: 'error', source: 'ebay', error: r.error };
+              // Wrong keys: say so once, in the eBay image search box, and stop asking eBay until they're changed.
+              if (/refused the keys|no-keys/.test(r.error)) {
+                ebayKeysBad = true;
+                $('imgSearchStatus').textContent = 'eBay says these keys are wrong (' + r.error.replace(/^.*\((.*)\)$/, '$1') + "). Use the Production keyset (not Sandbox): App ID goes in the first box, Cert ID in the second. Save them again to retry.";
+                $('imgSearchToggle').textContent = 'eBay image search: keys wrong';
+                $('imgSearchBox').hidden = false;
+              }
+            }
           }
           // Then (or if eBay didn't name it): the text printed on the photo.
           result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title);
-          if (ebay) result = { ...result, ebayTried: true, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
+          if (ebay) result = { ...result, ebayTried: ebay.status === 'error' && ebayKeysBad ? null : ebayKeyTag, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
         await store.patch(a.id, { photoId: { ...result, v: 3, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
@@ -619,7 +628,8 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
-          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? ` (${esc(a.photoId.error)})` : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
+          ${a.photoNameOnly ? `<span class="hint">Name read from the photo: <strong>${esc(a.cardName)}</strong> (the post says "${esc((a.sellerTitle || '').slice(0, 60))}"). Set and number not found yet.</span>` : ''}
+          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? ` (${esc(a.photoId.error)})` : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
           ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
@@ -784,6 +794,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     // The card read from the photo backs up the post: it names the card when the post doesn't
     // (or only gives a long description), and adds the set and number when the post has just the name.
     const pid = a.photoId && a.photoId.status === 'ok' ? a.photoId : null;
+    // Only the Pokémon's name could be read off the photo: still better than a post title that names no card.
+    const part = !pid && a.photoId && a.photoId.status === 'partial' && a.photoId.pokemon && !edited.cardName ? a.photoId.pokemon : null;
+    if (part && !out.cardNumber && !new RegExp(`(^|[^a-z])${part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '') && !/\b(etb|elite trainer|booster|box|bundle|tin|collection|pack|sealed|lot)\b/i.test(out.cardName || '')) {
+      out.sellerTitle = out.cardName; out.cardName = part; out.photoNameOnly = true; out.wholeLot = false;
+    }
     out.photoUsed = null;
     if (pid && !edited.cardName) {
       const titleNames = new RegExp(`(^|[^a-z])${pid.pokemon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '');
@@ -1056,6 +1071,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       $('imgSearchToggle').addEventListener('click', () => { $('imgSearchBox').hidden = !$('imgSearchBox').hidden; });
       const showKeys = app => {
         ebayKeys = !!(app && app.id && app.secret);
+        ebayKeyTag = ebayKeys ? app.id.slice(-6) + app.secret.length : ''; ebayKeysBad = false;
         $('ebayId').value = ''; $('ebaySecret').value = '';
         $('ebayId').placeholder = ebayKeys ? 'Saved (…' + app.id.slice(-4) + ')' : 'Client ID (App ID)';
         $('ebaySecret').placeholder = ebayKeys ? 'Saved' : 'Client Secret (Cert ID)';
@@ -1066,8 +1082,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       chrome.storage.local.get('settings').then(({ settings }) => { showKeys(settings && settings.ebayApp); photoIdQueue(); });
       $('imgSearchForm').addEventListener('submit', async e => {
         e.preventDefault();
-        const id = $('ebayId').value.trim(), secret = $('ebaySecret').value.trim();
+        let id = $('ebayId').value.trim(), secret = $('ebaySecret').value.trim();
         if (!id || !secret) { $('imgSearchStatus').textContent = 'Enter both the Client ID and the Client Secret.'; return; }
+        // The App ID looks like "Name-App-PRD-1a2b…", the Cert ID like "PRD-1a2b…": swap them if they went in the wrong boxes.
+        if (/^PRD-/i.test(id) && /-PRD-/i.test(secret)) [id, secret] = [secret, id];
+        if (/SBX/i.test(id + secret)) { $('imgSearchStatus').textContent = 'These are Sandbox keys (they contain "SBX"). Use the Production keyset instead.'; return; }
         await saveSetting({ ebayApp: { id, secret } }); showKeys({ id, secret }); photoIdQueue();
       });
       $('ebayKeysOff').addEventListener('click', async () => { await saveSetting({ ebayApp: null }); showKeys(null); });
