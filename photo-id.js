@@ -79,13 +79,15 @@ window.PhotoId = (() => {
     }
     return out;
   }
+  let ptcgDownAt = 0; // pokemontcg.io is often down for hours: after a failure, go straight to TCGdex for 10 minutes
   async function cardsQuery(q, extra, fetchJson) {
     let lastErr = null;
-    for (const wait of [0, 1500, 4000]) {
+    for (const wait of Date.now() - ptcgDownAt < 10 * 60e3 ? [] : [0, 1500]) {
       if (wait) await sleep(wait);
       try { const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(q) + extra); return (r && r.data) || []; }
       catch (e) { lastErr = e; if (!/answered 5\d\d|timeout|failed/i.test(String(e.message || e))) break; }
     }
+    if (lastErr) ptcgDownAt = Date.now();
     try { return await tcgdex(q, fetchJson); }
     catch (e) { throw new Error(`card lists unavailable (${(lastErr && lastErr.message) || e.message})`); }
   }
@@ -131,21 +133,67 @@ window.PhotoId = (() => {
   }
   async function titlePokemon(title) { return pokemonIn(title || ''); }
 
+  // The card's name as most eBay titles write it: the Pokémon with the word before it when that's part of the
+  // name ("Team Aqua's", "Dark", "Radiant"…) and the word after it when it's a card type ("ex", "GX", "V"…).
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function cardNameFrom(titles, pokemon) {
+    const count = new Map();
+    const re = new RegExp(`(?:\\b([A-Z][a-z]+'s|Team \\w+'s|Dark|Light|Radiant|Shining|Mega|M|Alolan|Galarian|Hisuian|Paldean|Rocket's|Erika's|Misty's|Brock's|Lt\\. Surge's|Sabrina's|Blaine's|Giovanni's|Koga's)\\s+)?${esc(pokemon)}(?:[\\s-]+(ex|EX|GX|V|VMAX|VSTAR|LV\\.X|BREAK|Prime|Star|δ|&\\s+\\w+(?:[\\s-]+GX)?))?(?![a-z])`, 'i');
+    for (const t of titles) {
+      const m = t.match(re); if (!m) continue;
+      const pre = m[1] && !/^(pokemon|pokémon|the|holo|rare|card|psa|cgc|bgs|mint|nm|tcg|japanese|english)'?s?$/i.test(m[1]) ? m[1] + ' ' : '';
+      const x = m[2] || '';
+      const suffix = !x ? '' : x.startsWith('&') ? ' ' + x.replace(/\s+/g, ' ').replace(/[\s-]+gx$/i, '-GX') : x === 'ex' ? ' ex' : /^(gx|ex)$/i.test(x) ? '-' + x.toUpperCase() : /^(v|vmax|vstar|lv\.x|break)$/i.test(x) ? ' ' + x.toUpperCase() : ' ' + x;
+      const k = pre + pokemon + suffix;
+      count.set(k, (count.get(k) || 0) + 1);
+    }
+    const best = [...count.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0];
+    return best ? best[0] : pokemon;
+  }
+  // The set most titles name, when they do.
+  const SETS = ['Base Set', 'Jungle', 'Fossil', 'Team Rocket', 'Gym Heroes', 'Gym Challenge', 'Neo Genesis', 'Neo Discovery', 'Neo Revelation', 'Neo Destiny', 'Expedition', 'Aquapolis', 'Skyridge',
+    'Ruby & Sapphire', 'Sandstorm', 'Dragon', 'Team Magma vs Team Aqua', 'Hidden Legends', 'FireRed & LeafGreen', 'Team Rocket Returns', 'Deoxys', 'Emerald', 'Unseen Forces', 'Delta Species', 'Legend Maker',
+    'Holon Phantoms', 'Crystal Guardians', 'Dragon Frontiers', 'Power Keepers', 'Diamond & Pearl', 'Mysterious Treasures', 'Secret Wonders', 'Great Encounters', 'Majestic Dawn', 'Legends Awakened', 'Stormfront',
+    'Platinum', 'Rising Rivals', 'Supreme Victors', 'Arceus', 'HeartGold SoulSilver', 'Unleashed', 'Undaunted', 'Triumphant', 'Call of Legends', 'Black & White', 'Emerging Powers', 'Noble Victories',
+    'Next Destinies', 'Dark Explorers', 'Dragons Exalted', 'Boundaries Crossed', 'Plasma Storm', 'Plasma Freeze', 'Plasma Blast', 'Legendary Treasures', 'Flashfire', 'Furious Fists', 'Phantom Forces',
+    'Primal Clash', 'Roaring Skies', 'Ancient Origins', 'BREAKthrough', 'BREAKpoint', 'Generations', 'Fates Collide', 'Steam Siege', 'Evolutions', 'Sun & Moon', 'Guardians Rising', 'Burning Shadows',
+    'Shining Legends', 'Crimson Invasion', 'Ultra Prism', 'Forbidden Light', 'Celestial Storm', 'Dragon Majesty', 'Lost Thunder', 'Team Up', 'Detective Pikachu', 'Unbroken Bonds', 'Unified Minds',
+    'Hidden Fates', 'Cosmic Eclipse', 'Sword & Shield', 'Rebel Clash', 'Darkness Ablaze', "Champion's Path", 'Vivid Voltage', 'Shining Fates', 'Battle Styles', 'Chilling Reign', 'Evolving Skies',
+    'Celebrations', 'Fusion Strike', 'Brilliant Stars', 'Astral Radiance', 'Pokemon GO', 'Lost Origin', 'Silver Tempest', 'Crown Zenith', 'Scarlet & Violet', 'Paldea Evolved', 'Obsidian Flames', '151',
+    'Paradox Rift', 'Paldean Fates', 'Temporal Forces', 'Twilight Masquerade', 'Shrouded Fable', 'Stellar Crown', 'Surging Sparks', 'Prismatic Evolutions', 'Journey Together', 'Destined Rivals',
+    'Black Bolt', 'White Flare', 'Mega Evolution', 'Phantasmal Flames']
+    .sort((a, b) => b.length - a.length).map(n => ({ n, re: new RegExp(`(^|[^a-z])${esc(n).replace(/ & /g, ' (?:&|and)? ?').replace(/ vs /g, ' (?:vs\\.?|versus) ')}(?![a-z])`, 'i') }));
+  function setFrom(titles) {
+    const c = new Map();
+    for (const t of titles) { const s = SETS.find(x => x.re.test(t)); if (s) c.set(s.n, (c.get(s.n) || 0) + 1); }
+    const best = [...c.entries()].sort((a, b) => b[1] - a[1])[0];
+    return best && best[1] >= 2 ? best[0] : '';
+  }
+
   // From the titles of the eBay listings that look most like the photo (eBay image search): the card number
   // and Pokémon most of them agree on, then the exact card from the card list.
   async function fromTitles(titles, fetchJson, title) {
     const top = (list) => { const c = new Map(); list.filter(Boolean).forEach(k => c.set(k, (c.get(k) || 0) + 1)); return [...c.entries()].sort((a, b) => b[1] - a[1])[0] || null; };
     const nums = titles.map(t => numbersIn(t)[0]).filter(Boolean);
-    const num = top(nums.map(n => n.n + '/' + n.total));
+    const num = top(nums.map(n => n.n + '/' + n.total.replace(/^0+(?=\d)/, '')));
     const mons = []; for (const t of titles.slice(0, 15)) mons.push(await pokemonIn(t));
     const mon = top(mons);
     const rar = top(titles.map(t => (RARITIES.find(([re]) => re.test(t)) || [])[1]));
     const pokemon = (mon && mon[0]) || await titlePokemon(title);
-    let found = null;
-    if (num && (num[1] >= 2 || titles.length === 1)) { const [n, total] = num[0].split('/'); found = await lookup(pokemon, [{ n, total }], fetchJson, title) || await lookup(null, [{ n, total }], fetchJson, pokemon || title); }
-    if (!found && pokemon && rar) { const b = await byName(pokemon, rar[0], titles.join(' '), fetchJson); if (b && b.status === 'ok') found = b; }
+    let found = null, listErr = null;
+    const sure = num && (num[1] >= 2 || titles.length === 1);
+    try {
+      if (sure) { const [n, total] = num[0].split('/'); found = await lookup(pokemon, [{ n, total }], fetchJson, title) || await lookup(null, [{ n, total }], fetchJson, pokemon || title); }
+      if (!found && pokemon && rar) { const b = await byName(pokemon, rar[0], titles.join(' '), fetchJson); if (b && b.status === 'ok') found = b; }
+    } catch (e) { listErr = e; }
     const sample = titles.slice(0, 3);
     if (found) return { ...found, source: 'ebay', distinct: 1, titles: sample };
+    // The card lists couldn't confirm it (down, or the card isn't in them): the eBay titles alone are enough
+    // when most of them agree on the Pokémon and the number.
+    if (sure && pokemon) {
+      const named = cardNameFrom(titles, pokemon);
+      return { status: 'ok', source: 'ebay', name: named, set: setFrom(titles), number: num[0], rarity: rar ? rar[0] : '', pokemon, distinct: 1, titles: sample, fromTitlesOnly: true, listError: listErr ? String(listErr.message || listErr) : null };
+    }
     return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
   }
 
@@ -224,7 +272,7 @@ window.PhotoId = (() => {
   }
   // Several cards in one auction: the first photo is cut into side-by-side (or stacked) parts, and every
   // other photo counts as a part too. Each named Pokémon gets the part and printing that look most alike.
-  async function identifyMany(dataUrls, pokemonList, fetchJson, fetchImg) {
+  async function identifyMany(dataUrls, pokemonList, fetchJson, fetchImg, ebayTitles) {
     const imgs = []; for (const d of dataUrls.slice(0, 4)) { try { imgs.push(await loadImg(d)); } catch {} }
     if (!imgs.length) return null;
     const regions = [];
@@ -236,8 +284,9 @@ window.PhotoId = (() => {
     const best = [];
     for (const mon of pokemonList) {
       const nameQ = /\s/.test(mon) ? `name:"${mon}*"` : `name:${mon}*`;
-      const cards = (await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson))
-        .filter(c => c.images && c.images.small && new RegExp(`(^|[^a-z])${mon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(c.name));
+      let cards = [];
+      try { cards = await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson); } catch {}
+      cards = cards.filter(c => c.images && c.images.small && new RegExp(`(^|[^a-z])${mon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(c.name));
       const sigs = [];
       for (let i = 0; i < cards.length; i += 6) await Promise.all(cards.slice(i, i + 6).map(async c => { try { const im = await loadImg(await fetchImg(c.images.small)); sigs.push({ c, g: grid(im, { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight }) }); } catch {} }));
       best.push(regions.map(r => { const sc = sigs.map(x => ({ c: x.c, d: dist(r, x.g) })).sort((a, b) => a.d - b.d); return sc.length ? { c: sc[0].c, d: sc[0].d, sure: !sc[1] || sc[0].d < sc[1].d * 0.9, count: sc.length } : null; }));
@@ -249,11 +298,18 @@ window.PhotoId = (() => {
       const t = p.reduce((s, r, i) => s + (best[i][r] ? best[i][r].d : 9), 0);
       if (t < total) { total = t; pick = p; }
     }
-    const items = pokemonList.map((mon, i) => {
+    const items = [];
+    for (const [i, mon] of pokemonList.entries()) {
+      // eBay image search of the photos: the listings that name this Pokémon (and not just as part of a longer name).
+      const re = new RegExp(`(^|[^a-z])${esc(mon)}(?![a-z])`, 'i');
+      const mine = (ebayTitles || []).filter(t => re.test(t));
+      if (mine.length >= 2) {
+        try { const e = await fromTitles(mine, fetchJson, mon); if (e.status === 'ok' && e.pokemon === mon) { items.push({ name: e.name, set: e.set, number: e.number, rarity: e.rarity || '', pokemon: mon, guessed: false, matches: mine.length, source: 'ebay' }); continue; } } catch {}
+      }
       const b = pick && best[i][pick[i]];
-      return b ? { name: b.c.name, set: b.c.set.name, number: `${b.c.number}/${b.c.set.printedTotal}`, rarity: b.c.rarity || '', pokemon: mon, guessed: !b.sure, matches: b.count } : { name: mon, set: '', number: '', pokemon: mon, guessed: true, matches: 0 };
-    });
-    return { status: items.some(x => x.number) ? 'ok' : 'partial', multi: true, items, source: 'picture', distinct: 1, name: items.map(x => x.name).join(' & ') };
+      items.push(b ? { name: b.c.name, set: b.c.set.name, number: `${b.c.number}/${b.c.set.printedTotal}`, rarity: b.c.rarity || '', pokemon: mon, guessed: !b.sure, matches: b.count } : { name: mon, set: '', number: '', pokemon: mon, guessed: true, matches: 0 });
+    }
+    return { status: items.some(x => x.number) ? 'ok' : 'partial', multi: true, items, source: items.some(x => x.source === 'ebay') ? 'ebay' : 'picture', distinct: 1, name: items.map(x => x.name).join(' & ') };
   }
 
   async function identify(dataUrls, fetchJson, title, fetchImg) {

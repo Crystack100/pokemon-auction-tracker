@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.29.2';
+  const SITE_VERSION = '0.30.0';
   const $ = id => document.getElementById(id);
   // The browser can keep an older copy of the page for a few minutes after an update, while this code is
   // always the newest: if the page is older than this code expects, load the page again fresh (once).
@@ -541,7 +541,7 @@ function countdownText(iso) {
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 6) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && ((a.photoId.v || 1) < 6 || Date.now() - Date.parse(a.photoId.at) > 15 * 60e3))));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 7) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'partial' && Date.now() - Date.parse(a.photoId.at) > 6 * 3600e3) || (a.photoId.status === 'error' && ((a.photoId.v || 1) < 7 || Date.now() - Date.parse(a.photoId.at) > 15 * 60e3))));
       for (const a of due) {
         let result;
         try {
@@ -555,9 +555,10 @@ function countdownText(iso) {
           const fetchJson = async url => { const r = await fetchPage(url); if (!r || r.error || r.status >= 400) throw new Error((r && r.error) || 'card list answered ' + (r && r.status)); return JSON.parse(r.text); };
           const title = a.lotText || a.cardName || '';
           // First: eBay's image search (with your eBay keys) finds listings of the same card, and their titles name it.
-          let ebay = null;
+          let ebay = null, ebayAll = [];
           if (ebayKeys && !ebayKeysBad) {
             const r = await fetchPage({ ebayImage: photos(a).find(u => /^https:/.test(u)) });
+            if (r && r.titles) ebayAll = r.titles;
             if (r && r.titles) ebay = r.titles.length ? await window.PhotoId.fromTitles(r.titles, fetchJson, title) : { status: 'none', source: 'ebay', titles: [] };
             else if (r && r.error) {
               ebay = { status: 'error', source: 'ebay', error: r.error };
@@ -574,11 +575,24 @@ function countdownText(iso) {
           const fetchImg = async url => { const r = await fetchPage(url); if (!r || !r.dataUrl) throw new Error('picture'); return r.dataUrl; };
           // Several cards named in the title ("Mew & Mewtwo"): each is found in the photos on its own.
           const mons = /&|\+|,|\/|\band\b|\bwith\b/i.test(title) ? await window.PhotoId.pokemonAll(title) : [];
-          if (mons.length >= 2 && mons.length <= 4) result = await window.PhotoId.identifyMany(imgs, mons, fetchJson, fetchImg);
-          else result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title, fetchImg);
+          // eBay naming one card with all of them in its name ("Mewtwo & Mew-GX") means it's a single tag-team card.
+          const tagTeam = ebay && ebay.status === 'ok' && mons.length >= 2 && mons.every(m => new RegExp(`(^|[^a-z])${m}(?![a-z])`, 'i').test(ebay.name));
+          if (mons.length >= 2 && mons.length <= 4 && !tagTeam) {
+            // Several cards: eBay image search of each photo (up to 4), then each Pokémon is named from the listings that mention it.
+            let titles = ebayAll;
+            if (ebayKeys && !ebayKeysBad && ebay && ebay.status !== 'error') {
+              for (const u of photos(a).filter(u => /^https:/.test(u)).slice(1, 4)) { const r = await fetchPage({ ebayImage: u }); if (r && r.titles) titles = titles.concat(r.titles); }
+            }
+            result = await window.PhotoId.identifyMany(imgs, mons, fetchJson, fetchImg, titles);
+          } else if (ebay && ebay.status === 'ok') result = ebay;
+          else {
+            // The photo's own text and picture. If the card lists are down, still keep what eBay found (the Pokémon's name).
+            try { result = await window.PhotoId.identify(imgs, fetchJson, title, fetchImg); }
+            catch (e) { if (ebay && ebay.status === 'partial') result = ebay; else throw e; }
+          }
           if (ebay) result = { ...result, ebayTried: ebay.status === 'error' && ebayKeysBad ? null : ebayKeyTag, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
-        await store.patch(a.id, { photoId: { ...result, v: 6, key: photoIdKey(a), at: new Date().toISOString() } });
+        await store.patch(a.id, { photoId: { ...result, v: 7, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       }
     } finally { photoIdRunning = false; }
@@ -645,9 +659,9 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
-          ${a.photoNameOnly ? `<span class="hint">Name read from the photo: <strong>${esc(a.cardName)}</strong> (the post says "${esc((a.sellerTitle || '').slice(0, 60))}"). Set and number not found yet.</span>` : ''}
-          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? (/answered 5\d\d|unavailable/.test(a.photoId.error || '') ? ' (the card lists are down right now; it tries again in 15 minutes)' : ` (${esc(a.photoId.error)})`) : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
-          ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.source === 'picture' ? (a.photoId.guessed ? `Closest picture match (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards, not certain)` : `Matched by picture (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards)`) : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
+          ${a.photoNameOnly ? `<span class="hint">Name read from the photo: <strong>${esc(a.cardName)}</strong>. Set and number not found yet.</span>` : ''}
+          ${!a.photoUsed && !a.multi && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? (/answered 5\d\d|unavailable/.test(a.photoId.error || '') ? ' (the card lists are down right now; it tries again in 15 minutes)' : ` (${esc(a.photoId.error)})`) : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
+          ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.source === 'picture' ? (a.photoId.guessed ? `Closest picture match (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards, not certain)` : `Matched by picture (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards)`) : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
           ${!a.wholeLot && !a.multi && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
@@ -811,7 +825,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (!edited.setName && parsed.setName) out.setName = parsed.setName;
     // The card read from the photo backs up the post: it names the card when the post doesn't
     // (or only gives a long description), and adds the set and number when the post has just the name.
-    const pid = a.photoId && a.photoId.status === 'ok' ? a.photoId : null;
+    const pid = a.photoId && (a.photoId.status === 'ok' || (a.photoId.status === 'partial' && a.photoId.multi)) ? a.photoId : null;
     // Only the Pokémon's name could be read off the photo: still better than a post title that names no card.
     const part = !pid && a.photoId && a.photoId.status === 'partial' && a.photoId.pokemon && !edited.cardName ? a.photoId.pokemon : null;
     if (part && !out.cardNumber && !new RegExp(`(^|[^a-z])${part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(out.cardName || '') && !/\b(etb|elite trainer|booster|box|bundle|tin|collection|pack|sealed|lot)\b/i.test(out.cardName || '')) {
