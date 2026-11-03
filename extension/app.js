@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.29.0';
+  const SITE_VERSION = '0.29.1';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -533,7 +533,7 @@ function countdownText(iso) {
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 5) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 15 * 60e3)));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 6) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && ((a.photoId.v || 1) < 6 || Date.now() - Date.parse(a.photoId.at) > 15 * 60e3))));
       for (const a of due) {
         let result;
         try {
@@ -570,16 +570,16 @@ function countdownText(iso) {
           else result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title, fetchImg);
           if (ebay) result = { ...result, ebayTried: ebay.status === 'error' && ebayKeysBad ? null : ebayKeyTag, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
-        await store.patch(a.id, { photoId: { ...result, v: 5, key: photoIdKey(a), at: new Date().toISOString() } });
+        await store.patch(a.id, { photoId: { ...result, v: 6, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       }
     } finally { photoIdRunning = false; }
   }
   function pcExplain(a) {
     const pc = a.pc;
-    if (!pc) return inExtension ? '<span class="hint">Checking PriceCharting…</span>' : '';
-    if (pc.status !== 'ok' && ebayMarket(a) && a.priceSource !== 'pc') return '';
-    if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">PriceCharting doesn't allow automatic checks. Press "PriceCharting ↗" below once and its price is saved here.</span>`;
+    if (!pc) return inExtension && a.priceSource === 'pc' ? '<span class="hint">Checking PriceCharting…</span>' : '';
+    if (pc.status !== 'ok' && a.priceSource !== 'pc') return ''; // only the chosen source's instruction
+    if (pc.status === 'blocked' || / 403$/.test(pc.error || '')) return `<span class="hint">Click "PriceCharting ↗" below to see its price. It only gets saved here once you've opened it.</span>`;
     if (pc.status === 'pick') return `<span class="hint">On the PriceCharting page, click the product that matches this auction and its price is saved here. If PriceCharting doesn't have it, the eBay AU average is used.</span>`;
     if (pc.status === 'error') return `<span class="hint">PriceCharting couldn't be read (${esc(pc.error)}). Open it with the link below.</span>`;
     if (pc.status === 'none') return `<span class="hint">No PriceCharting match for "${esc(pc.query)}". Change the search words in Fix details.</span>`;
@@ -601,7 +601,7 @@ function countdownText(iso) {
     const market = marketPrice(a);
     const auto = a.ebayAuto || {};
     const autoText = auto.average ? `eBay AU average ${money(auto.average)} from the last ${auto.count} sold` : auto.price ? `${auto.currency === 'USD' ? 'No Australian sales. eBay US: US' : 'eBay'} ${money(auto.price)}${auto.soldDate ? ', sold ' + esc(auto.soldDate) : ''}${auto.count > 1 ? ` · median of last ${auto.count}: ${money(auto.median)}` : ''}${auto.title ? `<br>Latest match: ${auto.itemUrl ? `<a href="${esc(auto.itemUrl)}" target="_blank" rel="noopener">${esc(auto.title)}</a>` : esc(auto.title)}` : ''}` :
-auto.status === 'none' ? 'No matching eBay AU sales found. Try other search words, then open eBay AU sold again.' : inExtension ? 'Open "eBay AU sold" below. The Australian sold average is saved here once that page loads.' : '';
+auto.status === 'none' ? 'No matching eBay AU sales found. Try other search words, then open eBay AU sold again.' : inExtension ? 'Click "eBay AU sold ↗" below to see the average. It only gets saved here once you\'ve opened it.' : '';
     const pics = photos(a);
     return `
     <article class="slab${cd.ended ? ' ended' : ''}" data-id="${a.id}">
@@ -638,7 +638,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${v.ratio != null ? `<div class="bar" title="Line marks the market price"><i style="width:${fill}%;background:${fillColor}"></i><b></b></div>
 ` : ''}
           ${a.photoNameOnly ? `<span class="hint">Name read from the photo: <strong>${esc(a.cardName)}</strong> (the post says "${esc((a.sellerTitle || '').slice(0, 60))}"). Set and number not found yet.</span>` : ''}
-          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? ` (${esc(a.photoId.error)})` : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
+          ${!a.photoUsed && a.photoId && !(a.edited || {}).cardName && !a.cardNumber ? `<span class="hint">Card number not found from the photo${a.photoId.status === 'error' ? (/answered 5\d\d|unavailable/.test(a.photoId.error || '') ? ' (the card lists are down right now; it tries again in 15 minutes)' : ` (${esc(a.photoId.error)})`) : a.photoId.note ? `: ${esc(a.photoId.note)}` : a.photoId.ebayNote && !/refused the keys|not allowed/.test(a.photoId.ebayNote) ? ` (eBay: ${esc(a.photoId.ebayNote)})` : ''}. Type it in Fix details if you know it.</span>` : ''}
           ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.source === 'picture' ? (a.photoId.guessed ? `Closest picture match (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards, not certain)` : `Matched by picture (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards)`) : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
