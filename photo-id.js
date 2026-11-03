@@ -126,7 +126,8 @@ window.PhotoId = (() => {
       const fit = rarity === 'Special Illustration Rare' ? /special illustration|special art/i : rarity === 'Illustration Rare' ? /illustration|art rare/i : rarity === 'Hyper Rare' ? /hyper|secret|gold/i : /ultra|full art/i;
       cards = (await get(nameQ)).filter(c => fit.test(c.rarity || '') && !(rarity === 'Illustration Rare' && /special/i.test(c.rarity || '')));
     }
-    if (!cards.length) return { status: 'none', pokemon, rarity, note: `The card list has no ${pokemon} ${rarity}` };
+    cards = inHint(cards);
+    if (!cards.length) return { status: 'none', pokemon, rarity, note: `The card list has no ${pokemon} ${rarity}${hint ? ' in ' + hint.label : ''}` };
     const digits = (text || '').replace(/\s+/g, '');
     const c = cards.find(c => digits.includes(`${c.number}/${c.set.printedTotal}`)) || cards.find(c => new RegExp(`(^|\\D)${c.number}(\\D|$)`).test(digits)) || cards[0];
     return { status: 'ok', name: c.name, set: c.set.name, number: `${c.number}/${c.set.printedTotal}`, rarity: c.rarity || '', pokemon, matches: cards.length, guessed: cards.length > 1 && c === cards[0] };
@@ -163,12 +164,25 @@ window.PhotoId = (() => {
     'Paradox Rift', 'Paldean Fates', 'Temporal Forces', 'Twilight Masquerade', 'Shrouded Fable', 'Stellar Crown', 'Surging Sparks', 'Prismatic Evolutions', 'Journey Together', 'Destined Rivals',
     'Black Bolt', 'White Flare', 'Mega Evolution', 'Phantasmal Flames']
     .sort((a, b) => b.length - a.length).map(n => ({ n, re: new RegExp(`(^|[^a-z])${esc(n).replace(/ & /g, ' (?:&|and)? ?').replace(/ vs /g, ' (?:vs\\.?|versus) ')}(?![a-z])`, 'i') }));
+  const THIRTIETH = { label: '30th Celebration', re: /\b30\s?th\b|30th anniv|celebration/i };
   function setFrom(titles) {
     const c = new Map();
-    for (const t of titles) { const s = SETS.find(x => x.re.test(t)); if (s) c.set(s.n, (c.get(s.n) || 0) + 1); }
+    for (const t of titles) { const s = /\b30\s?th\b/i.test(t) ? { n: THIRTIETH.label } : SETS.find(x => x.re.test(t)); if (s) c.set(s.n, (c.get(s.n) || 0) + 1); }
     const best = [...c.entries()].sort((a, b) => b[1] - a[1])[0];
     return best && best[1] >= 2 ? best[0] : '';
   }
+
+  // The set the post itself names ("30th Classic coll", "Hidden Fates"…): picture and name matches must come from
+  // it, so a look-alike printing from another set isn't picked. Set per auction with setPostText().
+  let hint = null;
+  function setPostText(text) {
+    text = text || '';
+    if (THIRTIETH.re.test(text) && /\b30\s?th\b/i.test(text)) { hint = THIRTIETH; return hint; }
+    const s = SETS.find(x => x.re.test(text) && x.n !== '151' && x.n !== 'Dragon' && x.n !== 'Platinum' && x.n !== 'Arceus' && x.n !== 'Generations' && x.n !== 'Evolutions');
+    hint = s ? { label: s.n, re: new RegExp('^' + esc(s.n) + '$', 'i') } : null;
+    return hint;
+  }
+  const inHint = cards => hint ? cards.filter(c => hint.re.test((c.set && c.set.name) || '')) : cards;
 
   // From the titles of the eBay listings that look most like the photo (eBay image search): the card number
   // and Pokémon most of them agree on, then the exact card from the card list.
@@ -188,11 +202,12 @@ window.PhotoId = (() => {
     } catch (e) { listErr = e; }
     const sample = titles.slice(0, 3);
     if (found) return { ...found, source: 'ebay', distinct: 1, titles: sample };
+    const named0 = setFrom(titles);
     // The card lists couldn't confirm it (down, or the card isn't in them): the eBay titles alone are enough
     // when most of them agree on the Pokémon and the number.
     if (sure && pokemon) {
       const named = cardNameFrom(titles, pokemon);
-      return { status: 'ok', source: 'ebay', name: named, set: setFrom(titles), number: num[0], rarity: rar ? rar[0] : '', pokemon, distinct: 1, titles: sample, fromTitlesOnly: true, listError: listErr ? String(listErr.message || listErr) : null };
+      return { status: 'ok', source: 'ebay', name: named, set: named0 || (hint ? hint.label : ''), number: num[0], rarity: rar ? rar[0] : '', pokemon, distinct: 1, titles: sample, fromTitlesOnly: true, listError: listErr ? String(listErr.message || listErr) : null };
     }
     return pokemon ? { status: 'partial', source: 'ebay', pokemon, titles: sample } : { status: 'none', source: 'ebay', titles: sample };
   }
@@ -238,8 +253,8 @@ window.PhotoId = (() => {
   async function byPicture(pokemon, dataUrl, fetchJson, fetchImg) {
     if (!pokemon || !fetchImg) return null;
     const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
-    const cards = (await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson)).filter(c => c.images && c.images.small);
-    if (!cards.length) return null;
+    const cards = inHint(await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson)).filter(c => c.images && c.images.small);
+    if (!cards.length) return null; // (also when the post's set isn't in the card list yet: no look-alike from another set)
     const photo = await loadImg(dataUrl);
     const mine = grid(photo, cardBox(photo));
     const scored = [];
@@ -286,7 +301,7 @@ window.PhotoId = (() => {
       const nameQ = /\s/.test(mon) ? `name:"${mon}*"` : `name:${mon}*`;
       let cards = [];
       try { cards = await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson); } catch {}
-      cards = cards.filter(c => c.images && c.images.small && new RegExp(`(^|[^a-z])${mon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(c.name));
+      cards = inHint(cards).filter(c => c.images && c.images.small && new RegExp(`(^|[^a-z])${mon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(c.name));
       const sigs = [];
       for (let i = 0; i < cards.length; i += 6) await Promise.all(cards.slice(i, i + 6).map(async c => { try { const im = await loadImg(await fetchImg(c.images.small)); sigs.push({ c, g: grid(im, { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight }) }); } catch {} }));
       best.push(regions.map(r => { const sc = sigs.map(x => ({ c: x.c, d: dist(r, x.g) })).sort((a, b) => a.d - b.d); return sc.length ? { c: sc[0].c, d: sc[0].d, sure: !sc[1] || sc[0].d < sc[1].d * 0.9, count: sc.length } : null; }));
@@ -307,7 +322,8 @@ window.PhotoId = (() => {
         try { const e = await fromTitles(mine, fetchJson, mon); if (e.status === 'ok' && e.pokemon === mon) { items.push({ name: e.name, set: e.set, number: e.number, rarity: e.rarity || '', pokemon: mon, guessed: false, matches: mine.length, source: 'ebay' }); continue; } } catch {}
       }
       const b = pick && best[i][pick[i]];
-      items.push(b ? { name: b.c.name, set: b.c.set.name, number: `${b.c.number}/${b.c.set.printedTotal}`, rarity: b.c.rarity || '', pokemon: mon, guessed: !b.sure, matches: b.count } : { name: mon, set: '', number: '', pokemon: mon, guessed: true, matches: 0 });
+      // An uncertain picture match only gives the card's name: its set and number could be a look-alike printing.
+      items.push(b ? { name: b.c.name, set: b.sure ? b.c.set.name : (hint ? hint.label : ''), number: b.sure ? `${b.c.number}/${b.c.set.printedTotal}` : '', rarity: b.c.rarity || '', pokemon: mon, guessed: !b.sure, matches: b.count } : { name: mon, set: hint ? hint.label : '', number: '', pokemon: mon, guessed: true, matches: 0 });
     }
     return { status: items.some(x => x.number) ? 'ok' : 'partial', multi: true, items, source: items.some(x => x.source === 'ebay') ? 'ebay' : 'picture', distinct: 1, name: items.map(x => x.name).join(' & ') };
   }
@@ -332,5 +348,5 @@ window.PhotoId = (() => {
     if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon || named ? { status: 'partial', pokemon: pokemon || named, distinct: nums.length, text: excerpt, note } : { status: 'none', text: excerpt, note };
   }
-  return { identify, identifyMany, pokemonAll, fromTitles, numbersIn, pokemonIn };
+  return { identify, identifyMany, pokemonAll, fromTitles, numbersIn, pokemonIn, setPostText };
 })();
