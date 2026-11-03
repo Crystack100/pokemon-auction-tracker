@@ -309,7 +309,10 @@
     if (/no\s*reserve|nr\b|\$1\s*nr/i.test(postText)) hasReserve = false;
     else {
       const r = parseMoney(postText, /reserve[^\d\n$]{0,20}\$?\s*(\d[\d,]*)/i);
+      // Some group templates write the reserve as a money-bag line on its own: "$0💰" or "💰 $50".
+      const bag = postText.match(/^\s*(?:💰\s*)?\$\s*(\d[\d,]*(?:\.\d+)?)\s*(?:💰)\s*$|^\s*💰\s*\$\s*(\d[\d,]*(?:\.\d+)?)\s*$/m);
       if (r != null) { reserve = r; hasReserve = true; }
+      else if (bag) { reserve = Number((bag[1] || bag[2]).replace(/,/g, '')); hasReserve = reserve > 0; }
       else if (/reserve/i.test(postText)) hasReserve = true;
     }
 

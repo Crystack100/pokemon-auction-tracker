@@ -22,6 +22,11 @@
     const key = 'auction:' + id;
     const a = (await chrome.storage.local.get(key))[key];
     if (!a) return badge('Pokémon Auction Tracker: that auction is no longer in your tracker.');
+    // eBay asking you to confirm you're a person: nothing to read. Tell the tracker (a "find all" run stops) and leave it to you.
+    if (/pardon our interruption|captcha|verify (that )?you('| a)re (a )?human|security measure/i.test(document.title + ' ' + (document.body ? document.body.innerText.slice(0, 2000) : '')) && !document.querySelector('.srp-results, .s-item, .s-card')) {
+      chrome.runtime.sendMessage({ type: 'ebay-blocked', id, item: item != null ? +item : null });
+      return badge('Pokémon Auction Tracker: eBay wants to check you\'re a person. Do that here, then reload this page.');
+    }
     const sales = EbaySold.parseSold(document.documentElement.outerHTML, query, a.grade);
     const s = EbaySold.summarise(sales);
     // Every matching sale with its date, so the tracker can work out the average itself (e.g. only recent sales).

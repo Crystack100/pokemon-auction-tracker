@@ -4,11 +4,11 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.32.1';
+  const SITE_VERSION = '0.33.0';
   const $ = id => document.getElementById(id);
   // The browser can keep an older copy of the page for a few minutes after an update, while this code is
   // always the newest: if the page is older than this code expects, load the page again fresh (once).
-  const PAGE_VERSION = '8';
+  const PAGE_VERSION = '9';
   const pageMeta = document.querySelector('meta[name="pat-page"]');
   if (location.protocol.startsWith('http') && (!pageMeta || pageMeta.content !== PAGE_VERSION)) {
     let tried = null; try { tried = sessionStorage.getItem('patFresh'); } catch {}
@@ -903,6 +903,38 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     return out;
   }
 
+  // "Find all market prices": every live card with no market price yet gets its eBay AU sold page (or PriceCharting,
+  // when that's the card's source) opened in a background tab by the extension, one by one, and read like a click.
+  function fillJobs() {
+    const now = Date.now(), jobs = [];
+    for (const a of auctions.filter(isTracked)) {
+      if (a.example || a.wholeLot || marketPrice(a) != null || (endOf(a) && new Date(endOf(a)) <= now)) continue;
+      if (a.multi && a.items) a.items.forEach((_, i) => { const ia = itemAuction(a, i); if (!ebayMarket(ia)) jobs.push({ id: a.id, item: i, url: marketLinks(ia)[0][1] }); });
+      else if (a.priceSource === 'pc') jobs.push({ id: a.id, url: marketLinks(a)[2][1] });
+      else jobs.push({ id: a.id, url: marketLinks(a)[0][1] });
+    }
+    return jobs;
+  }
+  const extAtLeast = (maj, min) => { const v = (chrome.runtime.getManifest().version || '0').split('.').map(Number); return v[0] > maj || (v[0] === maj && v[1] >= min); };
+  let fillState = null;
+  function showFill() {
+    if (!inExtension) return;
+    const n = fillJobs().length, f = fillState;
+    const running = f && f.running && Date.now() - Date.parse(f.at) < 90e3;
+    $('fillBtn').hidden = !running && !n;
+    $('fillBtn').disabled = !!running;
+    $('fillBtn').textContent = running ? `Finding prices… ${f.done} of ${f.total}` : `Find all market prices (${n})`;
+    $('fillStatus').textContent = running ? '' : !f ? '' : f.stopped === 'blocked'
+      ? `Stopped after ${f.done} of ${f.total}: eBay stopped showing results. Open one card's "eBay AU sold" link yourself (eBay may ask you to confirm you're a person), then press the button again.`
+      : f.total ? `Last run found prices for ${f.found} of ${f.total}.` : '';
+  }
+  async function startFill() {
+    if (!extAtLeast(0, 25)) { $('fillStatus').textContent = 'This button needs extension 0.25.0. Reinstall the extension once with the new zip, then press it again.'; return; }
+    const jobs = fillJobs();
+    if (!jobs.length) return;
+    fillState = { running: true, total: jobs.length, done: 0, found: 0, at: new Date().toISOString() }; showFill();
+    chrome.runtime.sendMessage({ type: 'ebay-fill', jobs });
+  }
   let sortFlipped = false;
   function showSortDir() {
     const names = { deal: ['Best deal first', 'Worst deal first'], ends: ['Ending soonest first', 'Ending latest first'], added: ['Newest first', 'Oldest first'] }[$('sort').value];
@@ -932,6 +964,7 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (sort === 'ends') list.sort((a, b) => by(ends, a, b));
     if (sort === 'added') list.sort((a, b) => by(added, a, b));
     $('count').textContent = `(${list.length})`;
+    showFill();
     $('grid').innerHTML = list.length ? list.map(renderCard).join('') :
       `<div class="empty">${auctions.some(isTracked) ? 'Nothing matches this filter.' : inExtension ? 'Nothing tracked yet. Open your auction group on Facebook and press "+ Track this auction" on any auction post.' : 'No auctions yet. Paste a post above and press Add to tracker.'}</div>`;
   }
@@ -978,6 +1011,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       $('trackingSection').hidden = view !== 'tracking';
     }));
     $('sort').addEventListener('change', () => { sortFlipped = false; showSortDir(); render(); });
+    $('fillBtn').addEventListener('click', startFill);
+    if (inExtension) {
+      chrome.storage.local.get('ebayFill').then(r => { fillState = r.ebayFill || null; showFill(); });
+      chrome.storage.onChanged.addListener(ch => { if (ch.ebayFill) { fillState = ch.ebayFill.newValue; showFill(); } });
+    }
     $('sortDir').addEventListener('click', () => { sortFlipped = !sortFlipped; showSortDir(); render(); });
     showSortDir();
 
