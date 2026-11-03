@@ -4,11 +4,11 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.30.0';
+  const SITE_VERSION = '0.31.0';
   const $ = id => document.getElementById(id);
   // The browser can keep an older copy of the page for a few minutes after an update, while this code is
   // always the newest: if the page is older than this code expects, load the page again fresh (once).
-  const PAGE_VERSION = '7';
+  const PAGE_VERSION = '8';
   const pageMeta = document.querySelector('meta[name="pat-page"]');
   if (location.protocol.startsWith('http') && (!pageMeta || pageMeta.content !== PAGE_VERSION)) {
     let tried = null; try { tried = sessionStorage.getItem('patFresh'); } catch {}
@@ -901,6 +901,13 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     return out;
   }
 
+  let sortFlipped = false;
+  function showSortDir() {
+    const names = { deal: ['Best deal first', 'Worst deal first'], ends: ['Ending soonest first', 'Ending latest first'], added: ['Newest first', 'Oldest first'] }[$('sort').value];
+    $('sortDir').textContent = sortFlipped ? '↑' : '↓';
+    $('sortDir').title = names[sortFlipped ? 0 : 1] + ' (click to flip)';
+    $('sortDir').setAttribute('aria-label', 'Showing ' + names[sortFlipped ? 1 : 0].toLowerCase() + '. Click to flip.');
+  }
   function render() {
     renderFound();
     renderUnder();
@@ -911,12 +918,17 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
     if (filter === 'live') list = list.filter(a => !endOf(a) || new Date(endOf(a)) > now);
     // Under market: live auctions only, whose bid is under the market price.
     if (filter === 'under') list = list.filter(a => { const m = marketPrice(a), b = a.currentBid ?? a.startBid ?? 0; return m && b < m && (!endOf(a) || new Date(endOf(a)) > now); });
-    const endKey = a => endOf(a) ? (new Date(endOf(a)) < now ? 9e15 + +new Date(endOf(a)) : +new Date(endOf(a))) : 8e15;
-    if (sort === 'ends') list.sort((a, b) => endKey(a) - endKey(b));
-    if (sort === 'deal') list.sort((a, b) => (verdict(a).ratio ?? 9) - (verdict(b).ratio ?? 9));
-    if (sort === 'added') list.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
-    // ...ordered from the smallest discount to the biggest.
-    if (filter === 'under') list.sort((a, b) => (verdict(b).ratio ?? 0) - (verdict(a).ratio ?? 0));
+    // Each sort has a natural order (best deal, soonest end, newest first); the arrow button flips it.
+    // Cards with nothing to sort by (no price, no end time) stay at the bottom either way.
+    const dir = sortFlipped ? -1 : 1;
+    const by = (key, a, b) => { const x = key(a), y = key(b); return x == null && y == null ? 0 : x == null ? 1 : y == null ? -1 : dir * (x - y); };
+    const ratio = a => verdict(a).ratio ?? null;
+    const ends = a => endOf(a) ? +new Date(endOf(a)) : null;
+    const added = a => a.addedAt ? -Date.parse(a.addedAt) : null;
+    // Under market (with Best deal): smallest discount first, as asked; the arrow flips it too.
+    if (sort === 'deal') list.sort(filter === 'under' ? (a, b) => by(x => ratio(x) == null ? null : -ratio(x), a, b) : (a, b) => by(ratio, a, b));
+    if (sort === 'ends') list.sort((a, b) => by(ends, a, b));
+    if (sort === 'added') list.sort((a, b) => by(added, a, b));
     $('count').textContent = `(${list.length})`;
     $('grid').innerHTML = list.length ? list.map(renderCard).join('') :
       `<div class="empty">${auctions.some(isTracked) ? 'Nothing matches this filter.' : inExtension ? 'Nothing tracked yet. Open your auction group on Facebook and press "+ Track this auction" on any auction post.' : 'No auctions yet. Paste a post above and press Add to tracker.'}</div>`;
@@ -963,7 +975,9 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       $('endedSection').hidden = view !== 'ended';
       $('trackingSection').hidden = view !== 'tracking';
     }));
-    $('sort').addEventListener('change', render);
+    $('sort').addEventListener('change', () => { sortFlipped = false; showSortDir(); render(); });
+    $('sortDir').addEventListener('click', () => { sortFlipped = !sortFlipped; showSortDir(); render(); });
+    showSortDir();
 
     const pick = () => $('file').click();
     $('drop').addEventListener('click', pick);

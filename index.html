@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="pat-page" content="7">
+<meta name="pat-page" content="8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <!--PAGE-->
 <title>Pokémon Auction Tracker</title>
@@ -78,6 +78,8 @@ label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transfo
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 .toolbar select { width: auto; }
+.toolbar .row { align-items: flex-end; }
+.sort-dir { font-size: 1.1rem; line-height: 1; padding: 8px 12px; min-width: 42px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
 .empty { color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 14px; padding: 28px; text-align: center; }
 
@@ -350,16 +352,16 @@ ol.sales li.dropped { text-decoration: line-through; }
           <select id="filter">
             <option value="live">Live auctions</option>
             <option value="under">Under market</option>
-            <option value="all">All, including ended</option>
           </select>
         </label>
         <label>Sort
           <select id="sort">
+            <option value="deal">Best deal</option>
             <option value="ends">Ending soonest</option>
-            <option value="deal">Best deal first</option>
             <option value="added">Recently added</option>
           </select>
         </label>
+        <button type="button" id="sortDir" class="sort-dir" aria-label="Flip sort direction" title="Flip direction">↓</button>
       </div>
     </div>
     <div class="grid" id="grid"></div>
