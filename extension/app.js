@@ -4,8 +4,16 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.29.1';
+  const SITE_VERSION = '0.29.2';
   const $ = id => document.getElementById(id);
+  // The browser can keep an older copy of the page for a few minutes after an update, while this code is
+  // always the newest: if the page is older than this code expects, load the page again fresh (once).
+  const PAGE_VERSION = '7';
+  const pageMeta = document.querySelector('meta[name="pat-page"]');
+  if (location.protocol.startsWith('http') && (!pageMeta || pageMeta.content !== PAGE_VERSION)) {
+    let tried = null; try { tried = sessionStorage.getItem('patFresh'); } catch {}
+    if (tried !== PAGE_VERSION) { try { sessionStorage.setItem('patFresh', PAGE_VERSION); } catch {} location.replace(location.pathname + '?fresh=' + Date.now()); return; }
+  }
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
     ['NSW', 'NSW / ACT'],
