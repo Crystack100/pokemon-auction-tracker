@@ -47,6 +47,49 @@ window.PhotoId = (() => {
     return hit ? hit.n : null;
   }
 
+  // The card list: pokemontcg.io (tried 3 times, it's sometimes down), then TCGdex as a second source.
+  // Both give cards as { name, number, rarity, set: { name, printedTotal }, images: { small } }.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let tcgdexSets = null;
+  async function getJson(url, fetchJson) {
+    try { const r = await fetch(url); if (r.ok) return await r.json(); } catch {} // straight from this page when the site allows it
+    return fetchJson(url);
+  }
+  async function tcgdex(q, fetchJson) {
+    const name = (q.match(/name:"?([^"*]+)\*?"?/) || [])[1];
+    const number = (q.match(/number:(\S+)/) || [])[1];
+    const total = (q.match(/set\.printedTotal:(\d+)/) || [])[1];
+    const rarity = (q.match(/rarity:"([^"]+)"/) || [])[1];
+    if (!name && !number) return [];
+    const base = 'https://api.tcgdex.net/v2/en';
+    if (!tcgdexSets) {
+      const sets = await getJson(base + '/sets', fetchJson);
+      tcgdexSets = new Map((sets || []).map((x, i) => [x.id, { name: x.name, official: x.cardCount && x.cardCount.official, order: i }]));
+    }
+    const params = [name ? 'name=' + encodeURIComponent(name.trim()) : '', number ? 'localId=' + encodeURIComponent(number) : ''].filter(Boolean).join('&');
+    let list = (await getJson(`${base}/cards?${params}`, fetchJson)) || [];
+    const setOf = c => tcgdexSets.get(c.id.slice(0, c.id.lastIndexOf('-'))) || { name: '', official: null, order: -1 };
+    list = list.filter(c => c.id && (!total || +setOf(c).official === +total) && (!name || c.name.toLowerCase().startsWith(name.trim().toLowerCase())));
+    list.sort((a, b) => setOf(b).order - setOf(a).order);
+    list = list.slice(0, 40);
+    const out = list.map(c => ({ name: c.name, number: c.localId, rarity: '', set: { name: setOf(c).name, printedTotal: setOf(c).official || '?' }, images: c.image ? { small: c.image + '/low.png' } : null, _id: c.id }));
+    if (rarity) { // rarity is only on each card's own page
+      for (let i = 0; i < out.length; i += 5) await Promise.all(out.slice(i, i + 5).map(async c => { try { const d = await getJson(`${base}/cards/${c._id}`, fetchJson); c.rarity = (d && d.rarity) || ''; } catch {} }));
+      return out.filter(c => c.rarity.toLowerCase() === rarity.toLowerCase());
+    }
+    return out;
+  }
+  async function cardsQuery(q, extra, fetchJson) {
+    let lastErr = null;
+    for (const wait of [0, 1500, 4000]) {
+      if (wait) await sleep(wait);
+      try { const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(q) + extra); return (r && r.data) || []; }
+      catch (e) { lastErr = e; if (!/answered 5\d\d|timeout|failed/i.test(String(e.message || e))) break; }
+    }
+    try { return await tcgdex(q, fetchJson); }
+    catch (e) { throw new Error(`card lists unavailable (${(lastErr && lastErr.message) || e.message})`); }
+  }
+
   // Looks a number (and name, if read) up in the Pokémon TCG card list; fetchJson goes through the extension.
   async function lookup(pokemon, nums, fetchJson, title) {
     const sel = '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=20';
@@ -54,8 +97,7 @@ window.PhotoId = (() => {
       const nameQ = pokemon ? (/\s/.test(pokemon) ? ` name:"${pokemon}*"` : ` name:${pokemon}*`) : '';
       const totalQ = /^\d+$/.test(total) ? ` set.printedTotal:${+total}` : '';
       for (const q of [`number:${n}${totalQ}${nameQ}`, nameQ ? `number:${n}${nameQ}` : null].filter(Boolean)) {
-        const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(q) + sel);
-        let cards = (r && r.data) || [];
+        let cards = await cardsQuery(q, sel, fetchJson);
         if (!nameQ && cards.length > 1) cards = cards.filter(c => new RegExp(`\\b${c.name.split(' ')[0]}\\b`, 'i').test(title || ''));
         if (cards.length && (nameQ || cards.length === 1)) {
           const c = cards[0];
@@ -75,7 +117,7 @@ window.PhotoId = (() => {
     const rarity = (RARITIES.find(([re]) => re.test(title || '')) || [])[1];
     if (!pokemon || !rarity) return null;
     const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
-    const get = async q => { const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(q) + '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=50'); return (r && r.data) || []; };
+    const get = q => cardsQuery(q, '&select=name,number,rarity,set&orderBy=-set.releaseDate&pageSize=50', fetchJson);
     let cards = await get(`${nameQ} rarity:"${rarity}"`);
     // The card list may word the rarity differently: all cards of this Pokémon, keeping the ones whose rarity fits.
     if (!cards.length) {
@@ -148,8 +190,7 @@ window.PhotoId = (() => {
   async function byPicture(pokemon, dataUrl, fetchJson, fetchImg) {
     if (!pokemon || !fetchImg) return null;
     const nameQ = /\s/.test(pokemon) ? `name:"${pokemon}*"` : `name:${pokemon}*`;
-    const r = await fetchJson('https://api.pokemontcg.io/v2/cards?q=' + encodeURIComponent(nameQ) + '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=60');
-    const cards = ((r && r.data) || []).filter(c => c.images && c.images.small);
+    const cards = (await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson)).filter(c => c.images && c.images.small);
     if (!cards.length) return null;
     const photo = await loadImg(dataUrl);
     const mine = grid(photo, cardBox(photo));
@@ -166,6 +207,53 @@ window.PhotoId = (() => {
     const c = best.c;
     return { status: 'ok', name: c.name, set: c.set.name, number: `${c.number}/${c.set.printedTotal}`, rarity: c.rarity || '', pokemon, matches: scored.length,
       source: 'picture', guessed: !sure, score: Math.round(best.d * 100) / 100 };
+  }
+
+  // Every Pokémon named in a title, in order ("Mew & Mewtwo" → Mew, Mewtwo).
+  async function pokemonAll(text) {
+    const flat = (text || '').replace(/[^A-Za-z.'\- ♀♂]/g, ' ');
+    const hits = [];
+    for (const x of await names()) {
+      if (x.n.length < 3) continue;
+      const m = flat.match(x.re);
+      if (!m) continue;
+      const at = m.index + m[1].length, end = at + x.n.length; // the same words can't be two Pokémon
+      if (!hits.some(h => at < h.end && end > h.at || h.n === x.n)) hits.push({ n: x.n, at, end });
+    }
+    return hits.sort((a, b) => a.at - b.at).map(h => h.n);
+  }
+  // Several cards in one auction: the first photo is cut into side-by-side (or stacked) parts, and every
+  // other photo counts as a part too. Each named Pokémon gets the part and printing that look most alike.
+  async function identifyMany(dataUrls, pokemonList, fetchJson, fetchImg) {
+    const imgs = []; for (const d of dataUrls.slice(0, 4)) { try { imgs.push(await loadImg(d)); } catch {} }
+    if (!imgs.length) return null;
+    const regions = [];
+    const box = cardBox(imgs[0]), n = pokemonList.length;
+    const across = box.w >= box.h * 0.9;
+    for (let i = 0; i < n; i++) regions.push(grid(imgs[0], across ? { x: box.x + box.w * i / n, y: box.y, w: box.w / n, h: box.h } : { x: box.x, y: box.y + box.h * i / n, w: box.w, h: box.h / n }));
+    for (const im of imgs.slice(1)) regions.push(grid(im, cardBox(im)));
+    // For each Pokémon: its printings' pictures, and the best printing for each part of the photos.
+    const best = [];
+    for (const mon of pokemonList) {
+      const nameQ = /\s/.test(mon) ? `name:"${mon}*"` : `name:${mon}*`;
+      const cards = (await cardsQuery(nameQ, '&select=name,number,rarity,set,images&orderBy=-set.releaseDate&pageSize=100', fetchJson))
+        .filter(c => c.images && c.images.small && new RegExp(`(^|[^a-z])${mon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'i').test(c.name));
+      const sigs = [];
+      for (let i = 0; i < cards.length; i += 6) await Promise.all(cards.slice(i, i + 6).map(async c => { try { const im = await loadImg(await fetchImg(c.images.small)); sigs.push({ c, g: grid(im, { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight }) }); } catch {} }));
+      best.push(regions.map(r => { const sc = sigs.map(x => ({ c: x.c, d: dist(r, x.g) })).sort((a, b) => a.d - b.d); return sc.length ? { c: sc[0].c, d: sc[0].d, sure: !sc[1] || sc[0].d < sc[1].d * 0.9, count: sc.length } : null; }));
+    }
+    // Give each Pokémon its own part of the photos (the arrangement with the closest matches overall).
+    const perms = (arr, k) => k === 0 ? [[]] : arr.flatMap((x, i) => perms(arr.filter((_, j) => j !== i), k - 1).map(p => [x, ...p]));
+    let pick = null, total = Infinity;
+    for (const p of perms([...regions.keys()], n)) {
+      const t = p.reduce((s, r, i) => s + (best[i][r] ? best[i][r].d : 9), 0);
+      if (t < total) { total = t; pick = p; }
+    }
+    const items = pokemonList.map((mon, i) => {
+      const b = pick && best[i][pick[i]];
+      return b ? { name: b.c.name, set: b.c.set.name, number: `${b.c.number}/${b.c.set.printedTotal}`, rarity: b.c.rarity || '', pokemon: mon, guessed: !b.sure, matches: b.count } : { name: mon, set: '', number: '', pokemon: mon, guessed: true, matches: 0 };
+    });
+    return { status: items.some(x => x.number) ? 'ok' : 'partial', multi: true, items, source: 'picture', distinct: 1, name: items.map(x => x.name).join(' & ') };
   }
 
   async function identify(dataUrls, fetchJson, title, fetchImg) {
@@ -188,5 +276,5 @@ window.PhotoId = (() => {
     if (found) return { ...found, distinct: found.guessed !== undefined ? 1 : nums.length, text: excerpt };
     return pokemon || named ? { status: 'partial', pokemon: pokemon || named, distinct: nums.length, text: excerpt, note } : { status: 'none', text: excerpt, note };
   }
-  return { identify, fromTitles, numbersIn, pokemonIn };
+  return { identify, identifyMany, pokemonAll, fromTitles, numbersIn, pokemonIn };
 })();

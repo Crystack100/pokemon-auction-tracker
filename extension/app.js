@@ -4,7 +4,7 @@
   const chrome = window.patBridge || window.chrome;
   const P = window.AuctionParser;
   // Bump with every change to the website, so you can see which version you have open.
-  const SITE_VERSION = '0.28.1';
+  const SITE_VERSION = '0.29.0';
   const $ = id => document.getElementById(id);
   const ZONE_CHOICES = [
     ['QLD', 'QLD (AEST, no daylight saving)'],
@@ -174,8 +174,12 @@ function countdownText(iso) {
   // then PriceCharting (in AUD) when there's no eBay average. Times the quantity.
   // eBay AU sold by default; switch a card to PriceCharting with the buttons on it when its eBay price
   // looks wrong. A card on eBay with no eBay price yet uses PriceCharting if it has one.
+  // One card of a several-card auction, priced on its own (eBay AU sold, saved per card).
+  const itemAuction = (a, i) => ({ ...a, multi: false, items: null, cardName: a.items[i].name, cardNumber: a.items[i].number, setName: a.items[i].set, ebayQuery: null, qty: 1, ebayAuto: (a.ebayItems || {})[i] || {}, itemIndex: i });
+  const multiMarket = a => { const each = a.items.map((_, i) => ebayMarket(itemAuction(a, i))); return each.every(Boolean) ? { average: each.reduce((t, x) => t + x.average, 0), each } : { average: null, each }; };
   const marketSource = a => {
     if (a.ebaySold != null) return 'typed';
+    if (a.multi && a.items) return multiMarket(a).average != null ? 'multi' : null;
     if (a.wholeLot) return null;
     if (a.priceSource === 'pc') return pcPrice(a) ? 'pc' : null;
     return ebayMarket(a) ? 'ebay' : pcPrice(a) ? 'pc' : null;
@@ -183,6 +187,7 @@ function countdownText(iso) {
   const marketPrice = a => {
     const src = marketSource(a);
     if (src === 'typed') return a.ebaySold;
+    if (src === 'multi') return multiMarket(a).average;
     if (src === 'ebay') return ebayMarket(a).average * qtyOf(a);
     if (src === 'pc') return pcPrice(a).aud * qtyOf(a);
     return null;
@@ -293,7 +298,7 @@ function countdownText(iso) {
     return [
       // Opening eBay AU sold listings also saves their average to the card (read by the extension on that page).
       // Individual trading cards, filtered to graded (slabs) or ungraded (raw) sales to match this card.
-      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id : ''}`],
+      ['eBay AU sold', `https://www.ebay.com.au/sch/${isSingleCard(a) ? '183454/' : ''}i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_sop=13&_ipg=60${isSingleCard(a) ? '&Graded=' + (a.grade ? 'Yes' : 'No') : ''}${inExtension ? '#pat=' + a.id + (a.itemIndex != null ? '&pi=' + a.itemIndex : '') : ''}`],
       ['eBay US sold', `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`],
       // Opening PriceCharting from here also saves its price to the card (read by the extension on that page).
       ['PriceCharting', (a.pc && a.pc.status === 'ok' && a.pc.url ? a.pc.url : pcSearchUrl(a)) + (inExtension ? '#pat=' + a.id : '')],
@@ -528,7 +533,7 @@ function countdownText(iso) {
     photoIdRunning = true;
     try {
       const due = auctions.filter(a => isTracked(a) && !a.example && a.source === 'facebook' && photos(a).some(u => /^https:/.test(u)) &&
-        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 4) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 12 * 3600e3)));
+        (!a.photoId || (a.photoId.key !== photoIdKey(a) && a.photoId.status !== 'error') || (a.photoId.status !== 'ok' && a.photoId.status !== 'error' && (a.photoId.v || 1) < 5) || (ebayKeys && !ebayKeysBad && a.photoId.ebayTried !== ebayKeyTag && a.photoId.status !== 'error') || (a.photoId.status === 'error' && Date.now() - Date.parse(a.photoId.at) > 15 * 60e3)));
       for (const a of due) {
         let result;
         try {
@@ -559,10 +564,13 @@ function countdownText(iso) {
           }
           // Then (or if eBay didn't name it): the text printed on the photo.
           const fetchImg = async url => { const r = await fetchPage(url); if (!r || !r.dataUrl) throw new Error('picture'); return r.dataUrl; };
-          result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title, fetchImg);
+          // Several cards named in the title ("Mew & Mewtwo"): each is found in the photos on its own.
+          const mons = /&|\+|,|\/|\band\b|\bwith\b/i.test(title) ? await window.PhotoId.pokemonAll(title) : [];
+          if (mons.length >= 2 && mons.length <= 4) result = await window.PhotoId.identifyMany(imgs, mons, fetchJson, fetchImg);
+          else result = ebay && ebay.status === 'ok' ? ebay : await window.PhotoId.identify(imgs, fetchJson, title, fetchImg);
           if (ebay) result = { ...result, ebayTried: ebay.status === 'error' && ebayKeysBad ? null : ebayKeyTag, ebayNote: ebay.status === 'ok' ? null : ebay.error || 'no eBay listing named it', ebayTitles: ebay.titles || [] };
         } catch (e) { result = { status: 'error', error: String(e.message || e) }; }
-        await store.patch(a.id, { photoId: { ...result, v: 4, key: photoIdKey(a), at: new Date().toISOString() } });
+        await store.patch(a.id, { photoId: { ...result, v: 5, key: photoIdKey(a), at: new Date().toISOString() } });
         if (result.status === 'ok') chrome.runtime.sendMessage({ type: 'ebay-check', id: a.id, force: true });
       }
     } finally { photoIdRunning = false; }
@@ -634,10 +642,11 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
           ${a.photoUsed ? `<span class="hint">${a.photoId.source === 'ebay' ? 'From eBay image search' : a.photoId.source === 'picture' ? (a.photoId.guessed ? `Closest picture match (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards, not certain)` : `Matched by picture (of ${a.photoId.matches} ${esc(a.photoId.pokemon)} cards)`) : a.photoId.guessed ? `Best match (${a.photoId.matches} ${esc(a.photoId.rarity)} cards of this Pokémon, newest picked)` : 'From the photo'}: <strong>${esc(a.photoId.name)}</strong> · ${esc(a.photoId.set)} ${esc(a.photoId.number)}${a.photoUsed === 'name' && a.sellerTitle ? ` (the post only says "${esc(a.sellerTitle.slice(0, 60))}")` : ''}. Wrong? Fix it in Fix details.</span>` : ''}
           ${a.ebaySold != null ? `<span class="hint">Market value <strong>${money(a.ebaySold)}</strong> (typed in Fix details)</span>` : ''}
           ${a.cardNumber && (a.ebayAuto?.sales || []).length && !ebayMarket(a) ? `<span class="hint">None of the ${(a.ebayAuto.sales || []).length} eBay AU sales were card ${esc(a.cardNumber)}. Open "eBay AU sold" again: the search now includes the number.</span>` : ''}
-          ${!a.wholeLot && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
+          ${!a.wholeLot && !a.multi && a.ebaySold == null ? `<div class="src-switch">Price from <button type="button" data-act="src-ebay" aria-pressed="${a.priceSource !== 'pc'}">eBay AU</button><button type="button" data-act="src-pc" aria-pressed="${a.priceSource === 'pc'}">PriceCharting</button></div>` : ''}
           ${a.wholeLot && a.ebaySold == null ? `<span class="hint">A whole lot with no single card named, so there's no eBay or PriceCharting price to compare. Type a market value in Fix details if you have one.</span>` : ''}
-          ${a.wholeLot ? '' : a.priceSource === 'pc' ? pcExplain(a) : `${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}${ebayMarket(a) ? '' : pcExplain(a)}`}
-          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot ? [] : marketLinks(a)).concat(photos(a)[0] && /^https?:/.test(photos(a)[0]) ? [['Image search', lensUrl(photos(a)[0])]] : []).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
+          ${a.multi && a.items ? `<div class="items">${a.items.map((it, i) => { const ia = itemAuction(a, i), m = ebayMarket(ia); return `<div class="hint">${i + 1}. <strong>${esc(it.name)}</strong>${it.set ? ` · ${esc(it.set)} ${esc(it.number)}` : ''}${it.guessed ? ' <small>(closest picture match)</small>' : ''}<br>${m ? `eBay AU average <strong>${money(m.average)}</strong> · ${m.count} sale${m.count === 1 ? '' : 's'}` : 'No eBay AU price yet'} · <a href="${esc(marketLinks(ia)[0][1])}" target="_blank" rel="noopener">eBay AU sold ↗</a></div>`; }).join('')}${multiMarket(a).average != null ? `<div class="hint">Market for all ${a.items.length}: <strong>${money(multiMarket(a).average)}</strong></div>` : `<div class="hint">Open "eBay AU sold" for each card once; the total market price is the sum of them.</div>`}</div>` : ''}
+          ${a.multi ? '' : a.wholeLot ? '' : a.priceSource === 'pc' ? pcExplain(a) : `${ebayMarket(a) ? ebayExplain(a) : autoText && !pcPrice(a) ? `<span class="hint">${autoText}</span>` : ''}${auto.checkedAt ? `<span class="hint">eBay checked ${esc(ago(auto.checkedAt))}</span>` : ''}${ebayMarket(a) ? '' : pcExplain(a)}`}
+          <div class="links">${/\/posts\/\d+/.test(a.postUrl || '') ? `<a href="${esc(a.postUrl)}" target="_blank" rel="noopener">Facebook post ↗</a>` : ''}${(a.wholeLot || a.multi ? [] : marketLinks(a)).concat(photos(a)[0] && /^https?:/.test(photos(a)[0]) ? [['Image search', lensUrl(photos(a)[0])]] : []).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join('')}</div>
         </div>
         <details>
           <summary>Fix details</summary>
@@ -801,7 +810,12 @@ auto.status === 'none' ? 'No matching eBay AU sales found. Try other search word
       out.sellerTitle = out.cardName; out.cardName = part; out.photoNameOnly = true; out.wholeLot = false;
     }
     out.photoUsed = null;
-    if (pid && !edited.cardName) {
+    out.multi = false; out.items = null;
+    if (pid && pid.multi && !edited.cardName) {
+      out.multi = true; out.items = pid.items; out.sellerTitle = out.cardName; out.cardName = pid.items.map(x => x.name).join(' & ');
+      out.wholeLot = false; out.qty = 1;
+      if (!edited.cardNumber) out.cardNumber = '';
+    } else if (pid && !edited.cardName) {
       // The card found from the photo comes first; the post's title only helps. Exceptions: sealed product
       // (a box or ETB in the title), and an uncertain photo match when the post itself gives a card number.
       const longTitle = (out.cardName || '').length > 70 || (out.cardName || '').split(/\s+/).length > 10; // a description, not a name

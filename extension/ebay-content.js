@@ -4,6 +4,7 @@
   const m = location.hash.match(/pat=([\w-]+)/);
   if (!m) return; // an ordinary eBay visit: do nothing
   const id = m[1];
+  const item = (location.hash.match(/[&#]pi=(\d+)/) || [])[1]; // one card of a several-card auction
   const query = new URLSearchParams(location.search).get('_nkw') || '';
 
   function badge(text) {
@@ -26,7 +27,7 @@
     // Every matching sale with its date, so the tracker can work out the average itself (e.g. only recent sales).
     const list = sales.slice(0, 60).map(x => ({ price: x.price, soldDate: x.soldDate, title: x.title, url: x.url, currency: x.currency }));
     const result = s.count ? { status: 'ok', ...s, sales: list } : { status: 'none', sales: list };
-    chrome.runtime.sendMessage({ type: 'ebay-result', id, result: { ...result, query, checkedAt: new Date().toISOString() } });
+    chrome.runtime.sendMessage({ type: 'ebay-result', id, item: item != null ? +item : null, result: { ...result, query, checkedAt: new Date().toISOString() } });
     badge(s.count
       ? `Saved ${list.length} sold listings to the tracker. It works out the average from the recent ones.`
       : 'Pokémon Auction Tracker: no matching sold listings on this page. Try other search words on the card.');

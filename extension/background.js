@@ -362,8 +362,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let u = null; try { u = new URL(msg.url); } catch {}
     // Also: the Pokémon TCG card list (to name a card from the number on its photo), and Facebook's
     // photo files (to read the text on the card), returned as image data.
-    const photo = u && (/(^|\.)fbcdn\.net$/.test(u.hostname) || u.hostname === 'images.pokemontcg.io');
-    if (!u || u.protocol !== 'https:' || !(u.hostname === 'www.pricecharting.com' || u.hostname === 'api.pokemontcg.io' || photo)) { sendResponse({ error: 'not allowed' }); return; }
+    const photo = u && (/(^|\.)fbcdn\.net$/.test(u.hostname) || u.hostname === 'images.pokemontcg.io' || u.hostname === 'assets.tcgdex.net');
+    if (!u || u.protocol !== 'https:' || !(u.hostname === 'www.pricecharting.com' || u.hostname === 'api.pokemontcg.io' || u.hostname === 'api.tcgdex.net' || photo)) { sendResponse({ error: 'not allowed' }); return; }
     fetch(u.href, { credentials: 'omit' })
       .then(async r => {
         if (!photo) return sendResponse({ status: r.status, url: r.url, text: await r.text() });
@@ -382,7 +382,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.tabs.query({ url: TRACKER_URL + '*' }).then(([t]) => t ? chrome.tabs.update(t.id, { active: true }) : chrome.tabs.create({ url }));
   }
   if (msg.type === 'pc-page') getAuction(msg.id).then(a => a && putAuction({ ...a, pcPage: { url: msg.url, html: String(msg.html).slice(0, 400000), at: new Date().toISOString() } }));
-  if (msg.type === 'ebay-result') getAuction(msg.id).then(a => a && putAuction({ ...a, ebayAuto: msg.result }));
+  if (msg.type === 'ebay-result') getAuction(msg.id).then(a => a && putAuction(msg.item != null ? { ...a, ebayItems: { ...(a.ebayItems || {}), [msg.item]: msg.result } } : { ...a, ebayAuto: msg.result }));
   if (msg.type === 'update-now') {
     (async () => {
       const list = msg.id ? [await getAuction(msg.id)] : (await allAuctions()).filter(a => a.tracked !== false && !a.dismissed);
